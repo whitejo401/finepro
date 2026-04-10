@@ -43,7 +43,11 @@ def get_ohlcv(
             return cached
 
     log.info("fetch pykrx ohlcv: %s (%s ~ %s)", ticker, start, end)
-    raw = krx.get_market_ohlcv(_fmt(start), _fmt(end), ticker)
+    try:
+        raw = krx.get_market_ohlcv(_fmt(start), _fmt(end), ticker)
+    except Exception as e:
+        log.warning("pykrx ohlcv API error for %s: %s", ticker, e)
+        return pd.DataFrame()
 
     if raw.empty:
         log.warning("empty result for %s", ticker)

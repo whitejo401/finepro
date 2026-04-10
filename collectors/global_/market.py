@@ -68,7 +68,11 @@ def get_price(
             return cached
 
     log.info("fetch yfinance: %s (%s ~ %s)", symbol, start, end)
-    raw = yf.download(symbol, start=start, end=end, progress=False, auto_adjust=True)
+    try:
+        raw = yf.download(symbol, start=start, end=end, progress=False, auto_adjust=True)
+    except Exception as e:
+        log.warning("yfinance download error for %s: %s", symbol, e)
+        return pd.DataFrame()
 
     if raw.empty:
         log.warning("empty result for %s", symbol)
@@ -106,10 +110,14 @@ def get_prices(
             return cached
 
     log.info("fetch yfinance multi: %d tickers", len(symbols))
-    raw = yf.download(
-        list(symbols.values()), start=start, end=end,
-        progress=False, auto_adjust=True
-    )
+    try:
+        raw = yf.download(
+            list(symbols.values()), start=start, end=end,
+            progress=False, auto_adjust=True
+        )
+    except Exception as e:
+        log.warning("yfinance multi-download error: %s", e)
+        return pd.DataFrame()
 
     if raw.empty:
         log.warning("empty result for multi-ticker download")
