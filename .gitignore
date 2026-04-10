@@ -1,0 +1,52 @@
+# 시크릿
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# 데이터
+data/
+*.csv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.db
+*.sqlite*
+
+# 파이썬
+__pycache__/
+*.py[cod]
+*.pyo
+build/
+dist/
+*.egg-info/
+
+# 가상환경
+.venv/
+venv/
+env/
+.conda/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# 로그
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 테스트
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/

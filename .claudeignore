@@ -1,0 +1,73 @@
+# ============================================================
+# .claudeignore - Claude Code가 읽지 않을 파일/디렉토리
+# .gitignore 문법과 동일
+# ============================================================
+
+# 시크릿 / 환경변수
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+credentials/
+
+# 데이터 파일 (용량 크고 코드가 아님)
+data/raw/
+data/cache/
+data/processed/
+*.csv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.db
+*.sqlite
+*.sqlite3
+
+# 파이썬 캐시 / 빌드
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# 가상환경
+.venv/
+venv/
+env/
+.conda/
+conda-env/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# 로그
+*.log
+logs/
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# 테스트 커버리지
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# 메모리/Claude 내부
+memory/
+.claude/projects/
