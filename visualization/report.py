@@ -46,12 +46,27 @@ _HTML_TEMPLATE = """\
     .chart-container {{ background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.08);
                          padding: 16px; margin-bottom: 32px; }}
     .meta {{ color: #7f8c8d; font-size: 0.85em; margin-bottom: 24px; }}
+    .disclaimer {{ background: #f8f9fa; border-left: 4px solid #bdc3c7; padding: 12px 16px;
+                   margin-top: 48px; font-size: 0.82em; color: #7f8c8d; line-height: 1.6; }}
+    .disclaimer strong {{ color: #555; }}
   </style>
 </head>
 <body>
   <h1>{title}</h1>
   <p class="meta">생성일: {generated_at} &nbsp;|&nbsp; 데이터 기간: {date_range}</p>
   {sections}
+  <div class="disclaimer">
+    <strong>데이터 출처</strong><br>
+    국내 주식·재무: 금융감독원 DART, 한국거래소(pykrx) &nbsp;|&nbsp;
+    국내 거시: 한국은행 ECOS &nbsp;|&nbsp;
+    글로벌 시장: Yahoo Finance &nbsp;|&nbsp;
+    미국 거시: Federal Reserve Bank of St. Louis (FRED) &nbsp;|&nbsp;
+    에너지: U.S. Energy Information Administration (EIA)<br><br>
+    <strong>면책 고지</strong><br>
+    본 리포트는 수집된 공개 데이터를 기반으로 자동 생성된 분석 결과물입니다.
+    원시 데이터를 그대로 재배포하지 않으며, 모든 차트는 가공·분석된 파생 지표입니다.
+    투자 조언이 아니며, 투자 결과에 대한 책임은 전적으로 본인에게 있습니다.
+  </div>
 </body>
 </html>
 """
@@ -67,6 +82,22 @@ _SECTION_TEMPLATE = """\
 def _fig_to_html(fig) -> str:
     """Figure를 CDN 방식 HTML 문자열로 변환한다."""
     return pio.to_html(fig, include_plotlyjs="cdn", full_html=False)
+
+
+def _is_raw_data_safe(df: pd.DataFrame) -> bool:
+    """
+    리포트 게시 전 원시 데이터 노출 여부를 간단히 체크한다.
+    반환값이 False면 경고 로그만 출력 (리포트 생성은 중단하지 않음).
+    위반 패턴: 100행 이상의 숫자 컬럼을 그대로 HTML 테이블로 변환하는 행위.
+    """
+    if len(df) > 100 and len(df.select_dtypes("number").columns) > 5:
+        log.warning(
+            "build_report: master has %d rows × %d numeric cols — "
+            "ensure only derived analysis (not raw prices) is published.",
+            len(df), len(df.select_dtypes("number").columns),
+        )
+        return False
+    return True
 
 
 def _select_close_cols(master: pd.DataFrame, max_cols: int = 20) -> list[str]:
@@ -105,6 +136,8 @@ def build_report(
     else:
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
+
+    _is_raw_data_safe(master)  # 원시 데이터 노출 경고 체크
 
     if master.empty:
         log.warning("build_report: master DataFrame is empty — generating skeleton report")
