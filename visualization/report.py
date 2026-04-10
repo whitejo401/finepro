@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 import plotly.io as pio
 
 from collectors.base import get_logger
@@ -168,6 +169,61 @@ def build_report(
                         chart_html=_fig_to_html(fig_ret),
                     )
                 )
+
+        # ── 3. 매크로 국면 분류 ─────────────────────────────────────────────
+        try:
+            from analysis.regime import regime_summary
+            pmi_col = next((c for c in master.columns if "pmi" in c), None)
+            cpi_col = next((c for c in master.columns if "cpi" in c), None)
+            if pmi_col and cpi_col:
+                rsummary = regime_summary(master, pmi_col=pmi_col, cpi_col=cpi_col)
+                if rsummary:
+                    perf = rsummary.get("performance")
+                    current = rsummary.get("current", "")
+                    regime_html = f"<p><strong>현재 국면:</strong> {current}</p>"
+                    if perf is not None and not perf.empty:
+                        regime_html += perf.round(4).to_html(classes="table")
+                    sections.append(_SECTION_TEMPLATE.format(
+                        heading="매크로 국면 분류 (Merrill Lynch Clock)",
+                        chart_html=regime_html,
+                    ))
+        except Exception as e:
+            log.warning("build_report: regime section failed: %s", e)
+
+        # ── 4. 백테스팅 (단순 buy-and-hold 기준) ───────────────────────────
+        try:
+            from analysis.backtest import calc_returns, backtest_equal_weight, calc_performance_metrics
+            if close_cols:
+                price_df = master[[c for c in close_cols if c in master.columns]].dropna(how="all")
+                rets = calc_returns(price_df)
+                signal = pd.DataFrame(True, index=rets.index, columns=rets.columns)
+                cumret = backtest_equal_weight(rets, signal, rebal_freq="ME")
+                benchmark_col = next((c for c in ["kr_kospi_close", "us_sp500_close"] if c in price_df.columns), None)
+                benchmark_ret = calc_returns(price_df[[benchmark_col]]).iloc[:, 0] if benchmark_col else None
+                metrics = calc_performance_metrics(rets.mean(axis=1), benchmark=benchmark_ret)
+
+                fig_bt = go.Figure()
+                fig_bt.add_trace(go.Scatter(x=cumret.index, y=(1 + cumret).cumprod() if cumret.max() < 1 else cumret,
+                                            name="포트폴리오", line=dict(color="#2ecc71")))
+                if benchmark_ret is not None:
+                    bm_cum = (1 + benchmark_ret).cumprod()
+                    fig_bt.add_trace(go.Scatter(x=bm_cum.index, y=bm_cum,
+                                                name=benchmark_col.replace("_close", ""),
+                                                line=dict(dash="dash", color="#95a5a6")))
+                fig_bt.update_layout(title="동일가중 포트폴리오 vs 벤치마크", yaxis_title="누적 수익률", xaxis_title="날짜")
+
+                metrics_html = "<br>".join([
+                    f"<b>연환산 수익률:</b> {metrics.get('annualized_return', 'N/A'):.2%}" if isinstance(metrics.get('annualized_return'), float) else "",
+                    f"<b>샤프 비율:</b> {metrics.get('sharpe_ratio', 'N/A'):.2f}" if isinstance(metrics.get('sharpe_ratio'), float) else "",
+                    f"<b>최대 낙폭:</b> {metrics.get('max_drawdown', 'N/A'):.2%}" if isinstance(metrics.get('max_drawdown'), float) else "",
+                    f"<b>승률:</b> {metrics.get('win_rate', 'N/A'):.1%}" if isinstance(metrics.get('win_rate'), float) else "",
+                ])
+                sections.append(_SECTION_TEMPLATE.format(
+                    heading="백테스팅 결과",
+                    chart_html=_fig_to_html(fig_bt) + f"<div style='margin-top:12px'>{metrics_html}</div>",
+                ))
+        except Exception as e:
+            log.warning("build_report: backtest section failed: %s", e)
 
         sections_html = "\n".join(sections) if sections else "<p>차트를 생성할 데이터가 부족합니다.</p>"
 
