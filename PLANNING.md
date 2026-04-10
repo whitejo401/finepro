@@ -102,8 +102,8 @@ def plot_*(data, title: str, **options) -> go.Figure
 
 | 단계 | 목표 | 완료 기준 | 상태 |
 |------|------|----------|------|
-| M1 | 환경 설정 | venv, requirements.txt, .env | ⬜ |
-| M2 | 첫 수집기 2개 | yfinance + pykrx 동작, parquet 저장 | ⬜ |
+| M1 | 환경 설정 | venv, requirements.txt, .env | ✅ |
+| M2 | 첫 수집기 2개 | yfinance + pykrx 동작, parquet 저장 | ✅ |
 | M3 | 처리 파이프라인 | master DataFrame 생성 | ⬜ |
 | M4 | 첫 시각화 | KOSPI vs 글로벌·환율·VIX 히트맵 | ⬜ |
 | M5 | 거시 추가 | fredapi, 매크로 국면 분류 | ⬜ |
