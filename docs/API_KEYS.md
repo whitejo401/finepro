@@ -7,6 +7,102 @@
 
 ---
 
+## API 신청 용도 입력 예시
+
+> 각 서비스의 신청 양식에 그대로 붙여넣기 가능하도록 작성했다.
+> 본인의 실제 목적에 맞게 수정하여 사용할 것.
+
+### DART (한국어)
+```
+글로벌 매크로 퀀트 분석 시스템 개인 개발 프로젝트에 활용하고자 합니다.
+국내 상장기업의 재무제표(손익계산서, 재무상태표) 및 공시 데이터를 수집하여
+ROE, ROA, 부채비율 등 투자지표를 산출하고, 저평가 종목 스크리닝 및
+포트폴리오 팩터 분석에 사용할 예정입니다.
+수집된 데이터는 개인 투자 분석 및 비상업적 리서치 목적으로만 활용됩니다.
+```
+
+### ECOS 한국은행 (한국어)
+```
+개인 퀀트 투자 분석 도구 개발 목적으로 신청합니다.
+기준금리, 소비자물가지수(CPI), GDP 성장률, M2 통화량 등 한국 거시경제 지표를
+수집하여 매크로 경제 국면(성장/침체/인플레이션 등)을 분류하고,
+국내 주식·채권 시장과의 상관관계 분석에 활용할 계획입니다.
+개인 학습 및 투자 연구 목적이며, 데이터는 외부에 재배포하지 않습니다.
+```
+
+### 공공데이터포털 (한국어)
+```
+국내 금융 데이터 분석 파이프라인 개발을 위해 신청합니다.
+상장법인 목록 및 기업 기본 정보를 활용하여 특정 시점 기준 유효 종목 유니버스를
+구성하고, 백테스팅 분석 시 생존편향을 방지하는 데 사용할 예정입니다.
+개인 투자 연구 목적이며 수집 데이터는 외부에 제공하지 않습니다.
+```
+
+### 국토교통부 실거래가 (한국어)
+```
+부동산 시장과 금융 자산 시장 간의 상관관계 분석을 위해 신청합니다.
+아파트 실거래가 추이를 금리, 주가 등 금융 지표와 연계하여
+매크로 투자 환경 분석에 보조 지표로 활용할 예정입니다.
+개인 연구 목적이며 원본 데이터를 그대로 재배포하지 않습니다.
+```
+
+### FRED, St. Louis Fed (English)
+```
+I am developing a personal quantitative investment analysis system that collects
+and processes global macroeconomic data. I plan to use FRED API to retrieve
+key US economic indicators including CPI, GDP, unemployment rate, Federal Funds
+Rate, Treasury yield spreads (10Y-2Y), and high-yield credit spreads.
+
+This data will be used to classify macroeconomic regimes (reflation, overheat,
+stagflation, deflation) and analyze correlations with equity and commodity markets.
+The project is for personal investment research and non-commercial use.
+```
+
+### EIA, U.S. Energy Information Administration (English)
+```
+I am building a personal macro quantitative research tool that incorporates
+commodity market data. I plan to use the EIA API to collect crude oil inventory
+levels, U.S. production data, and natural gas prices as inputs for a global
+macro regime classification model. This is for personal investment research only.
+```
+
+### CoinGecko (English)
+```
+I am developing a personal portfolio analysis tool for global macro and
+cryptocurrency market research. I plan to use the CoinGecko API to retrieve
+cryptocurrency market capitalization, Bitcoin dominance, and price data for
+correlation analysis with traditional asset classes (equities, commodities, FX).
+This is for personal investment research and educational purposes.
+```
+
+### Glassnode (English)
+```
+I am conducting personal research on the relationship between on-chain
+cryptocurrency metrics and macro market conditions. I plan to use Glassnode's
+API to analyze on-chain activity indicators (active addresses, SOPR, exchange
+flows) as sentiment and positioning proxies in a broader multi-asset analysis
+framework. For personal, non-commercial use only.
+```
+
+### NewsAPI (English)
+```
+I am building a personal financial sentiment analysis pipeline that monitors
+global news headlines related to macroeconomic events, central bank policy,
+and geopolitical developments. News data will be used for NLP-based sentiment
+scoring to serve as a supplementary indicator in a quantitative investment
+research system. For personal, non-commercial research use only.
+```
+
+### Reddit (앱 등록 시 description 입력란)
+```
+Personal financial data research tool. Collects and analyzes sentiment from
+finance-related subreddits (r/investing, r/wallstreetbets, r/stocks) to build
+a community sentiment index as a contrarian/momentum indicator for personal
+investment research. Non-commercial, personal use only.
+```
+
+---
+
 ## 사용 조건 요약표
 
 | API | 개인 사용 | 상업적 사용 | 데이터 재판매 | 출처 표기 |
