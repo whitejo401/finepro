@@ -4,6 +4,21 @@
 글로벌 매크로 퀀트 인텔리전스 시스템 구축.
 뉴스/지표/데이터가 상호작용하여 자산 시장에 미치는 영향을 수집·분석·예측하는 파이프라인.
 
+## 에이전트 구성
+
+### 프로젝트 전용 (6개)
+| 파트 | 에이전트 | 역할 |
+|------|---------|------|
+| 기획 | `finance-planner` | 시스템 설계, 매크로 리서치, 전략 기획 |
+| 개발 | `kr-collector` | 국내 데이터 수집 (pykrx, dart-fss, ECOS 등) |
+| 개발 | `global-collector` | 글로벌+대체 데이터 수집 (yfinance, fredapi 등) |
+| 개발 | `data-processor` | ETL, Z-Score 정규화, 주기 병합 |
+| 개발 | `analyst` | 퀀트 분석, 백테스팅, 시각화 |
+| QA | `data-validator` | 생존편향·룩어헤드 바이어스·데이터 무결성 검증 |
+
+### 글로벌 공통 (4개, 자동 사용)
+- `planner` — 일반 설계, `Explore` — 코드 탐색, `code-reviewer` — 코드 품질, `security-reviewer` — 보안
+
 ## 기술 스택
 - **언어**: Python 3.10+
 - **데이터**: pandas, numpy
