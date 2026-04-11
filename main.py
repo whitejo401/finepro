@@ -18,9 +18,10 @@ def parse_args():
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument(
         "--mode",
-        choices=["daily", "weekly", "monthly", "all"],
+        choices=["daily", "weekly", "monthly", "all",
+                 "d1", "d2", "d3", "w2", "w3", "w4", "m1", "m3"],
         default="all",
-        help="생성할 리포트 종류 (daily/weekly/monthly/all)",
+        help="생성할 리포트 종류",
     )
     return parser.parse_args()
 
@@ -115,32 +116,39 @@ def main():
     mode = args.mode
     generated: list[str] = []
 
-    if mode in ("daily", "all"):
-        try:
-            from visualization.report import build_daily_report
-            path = build_daily_report(master)
-            log.info("일간 리포트: %s", path)
-            generated.append(path)
-        except Exception as e:
-            log.error("daily report failed: %s", e)
+    _REPORT_MAP = {
+        "d1": ("build_daily_report",   "일간 시황"),
+        "d2": ("build_d2_report",      "연준·감성"),
+        "d3": ("build_d3_report",      "암호화폐"),
+        "w2": ("build_weekly_report",  "주간 국면"),
+        "w3": ("build_w3_report",      "크립토 상관"),
+        "w4": ("build_w4_report",      "KOSPI 3각"),
+        "m1": ("build_report",         "월간 종합"),
+        "m3": ("build_m3_report",      "경기 사이클"),
+    }
 
-    if mode in ("weekly", "all"):
-        try:
-            from visualization.report import build_weekly_report
-            path = build_weekly_report(master)
-            log.info("주간 리포트: %s", path)
-            generated.append(path)
-        except Exception as e:
-            log.error("weekly report failed: %s", e)
+    # mode 별 실행 대상 결정
+    if mode == "all":
+        targets = list(_REPORT_MAP.keys())
+    elif mode == "daily":
+        targets = ["d1", "d2", "d3"]
+    elif mode == "weekly":
+        targets = ["w2", "w3", "w4"]
+    elif mode == "monthly":
+        targets = ["m1", "m3"]
+    else:
+        targets = [mode]
 
-    if mode in ("monthly", "all"):
+    import visualization.report as _rpt
+    for key in targets:
+        func_name, label = _REPORT_MAP[key]
         try:
-            from visualization.report import build_report
-            path = build_report(master)
-            log.info("월간 리포트: %s", path)
+            func = getattr(_rpt, func_name)
+            path = func(master)
+            log.info("%s 리포트: %s", label, path)
             generated.append(path)
         except Exception as e:
-            log.error("monthly report failed: %s", e)
+            log.error("%s report failed: %s", label, e)
 
     for p in generated:
         print(f"Report: {p}")

@@ -20,6 +20,10 @@ from visualization.charts import (
     plot_cumulative_returns,
     plot_daily_returns,
     plot_regime_timeline,
+    plot_gauge,
+    plot_regime_path,
+    plot_rolling_correlation,
+    _REGIME_COLORS,
 )
 from visualization.disclaimer import get_html_disclaimer
 
@@ -562,3 +566,520 @@ def build_weekly_report(
 
 def date_today() -> date:
     return date.today()
+
+
+# ---------------------------------------------------------------------------
+# build_d2_report  (D-2 연준·금리 감성)
+# ---------------------------------------------------------------------------
+
+def build_d2_report(
+    master: pd.DataFrame,
+    date: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    D-2 연준·금리 감성 스냅샷 HTML 리포트.
+
+    포함 섹션:
+      1. 뉴스 감성 게이지 (global + fed)
+      2. 감성 점수 30일 라인 차트
+      3. 금리 현황 테이블
+
+    Returns: 저장 경로(str)
+    """
+    daily_dir = REPORTS_DIR / "daily"
+    daily_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = date or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else daily_dir / f"d2_sentiment_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+
+    # ── 1. 감성 게이지 ──────────────────────────────────────────────────────
+    gauge_html = ""
+    for col, label in [("sent_news_global", "글로벌 경제 감성"), ("sent_news_fed", "연준 감성")]:
+        if col not in master.columns:
+            continue
+        s = master[col].dropna()
+        if s.empty:
+            continue
+        ref_ts = pd.Timestamp(ref_date)
+        avail = s.index[s.index <= ref_ts]
+        if avail.empty:
+            continue
+        val_raw = float(s.loc[avail[-1]])          # -1 ~ 1
+        val_100 = (val_raw + 1) / 2 * 100          # 0 ~ 100
+        fig = plot_gauge(val_100, title=label, low_label="극부정", high_label="극긍정")
+        gauge_html += f"<div style='display:inline-block;width:48%;min-width:220px'>{_fig_to_html(fig)}</div>"
+
+    if gauge_html:
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="뉴스 감성 점수 (VADER)",
+            chart_html=f"<div style='display:flex;gap:8px;flex-wrap:wrap'>{gauge_html}</div>",
+        ))
+
+    # ── 2. 감성 30일 라인 차트 ──────────────────────────────────────────────
+    sent_cols = [c for c in ["sent_news_global", "sent_news_fed"] if c in master.columns]
+    if sent_cols:
+        cutoff = pd.Timestamp(ref_date) - pd.Timedelta(days=30)
+        df_sent = master[sent_cols].loc[master.index >= cutoff].dropna(how="all")
+        if not df_sent.empty:
+            fig_line = go.Figure()
+            colors_map = {"sent_news_global": "#3498db", "sent_news_fed": "#e74c3c"}
+            labels_map = {"sent_news_global": "글로벌 경제", "sent_news_fed": "연준"}
+            for col in sent_cols:
+                if col in df_sent.columns:
+                    s = df_sent[col].dropna()
+                    if not s.empty:
+                        # 7일 이동평균
+                        ma = s.rolling(7, min_periods=1).mean()
+                        fig_line.add_trace(go.Scatter(
+                            x=s.index, y=s.values, mode="markers",
+                            marker=dict(size=4, color=colors_map.get(col, "#95a5a6")),
+                            name=labels_map.get(col, col), opacity=0.4, showlegend=True,
+                        ))
+                        fig_line.add_trace(go.Scatter(
+                            x=ma.index, y=ma.values, mode="lines",
+                            line=dict(color=colors_map.get(col, "#95a5a6"), width=2),
+                            name=f"{labels_map.get(col, col)} (7일 MA)", showlegend=True,
+                        ))
+            fig_line.add_hline(y=0, line_dash="dot", line_color="#bdc3c7")
+            fig_line.update_layout(
+                title="뉴스 감성 점수 추이 (최근 30일)",
+                yaxis=dict(title="감성 점수 (-1~1)", range=[-1.1, 1.1]),
+                hovermode="x unified",
+            )
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="감성 점수 추이",
+                chart_html=_fig_to_html(fig_line),
+            ))
+
+    # ── 3. 금리 현황 테이블 ─────────────────────────────────────────────────
+    rate_cols = [
+        ("rate_fed",         "연준 기준금리"),
+        ("rate_us10y",       "미 10년 금리"),
+        ("rate_us2y",        "미 2년 금리"),
+        ("rate_spread_10_2", "10-2년 스프레드"),
+        ("rate_hy_spread",   "하이일드 스프레드"),
+    ]
+    rows = []
+    ref_ts = pd.Timestamp(ref_date)
+    for col, label in rate_cols:
+        if col not in master.columns:
+            continue
+        s = master[col].dropna()
+        avail = s.index[s.index <= ref_ts]
+        if avail.empty:
+            continue
+        val = float(s.loc[avail[-1]])
+        prev = s.index[s.index < avail[-1]]
+        chg = f"{val - float(s.loc[prev[-1]]):+.3f}" if not prev.empty else "—"
+        rows.append((label, f"{val:.3f}%", chg, avail[-1].strftime("%Y-%m-%d")))
+
+    if rows:
+        tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+               "<tr style='background:#ecf0f1'><th style='padding:6px 12px;text-align:left'>지표</th>"
+               "<th style='padding:6px 12px;text-align:right'>현재값</th>"
+               "<th style='padding:6px 12px;text-align:right'>전기 대비</th>"
+               "<th style='padding:6px 12px;text-align:right'>기준일</th></tr>")
+        for i, (lbl, val, chg, dt) in enumerate(rows):
+            bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+            tbl += (f"<tr style='background:{bg}'><td style='padding:6px 12px'>{lbl}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>{val}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>{chg}</td>"
+                    f"<td style='padding:6px 12px;text-align:right;color:#999'>{dt}</td></tr>")
+        tbl += "</table>"
+        sections.append(_SECTION_TEMPLATE.format(heading="금리 현황", chart_html=tbl))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"연준·금리 감성 스냅샷 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_d2_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_d3_report  (D-3 암호화폐 스냅샷)
+# ---------------------------------------------------------------------------
+
+def build_d3_report(
+    master: pd.DataFrame,
+    date: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    D-3 암호화폐 스냅샷 HTML 리포트.
+
+    포함 섹션:
+      1. BTC 도미넌스 게이지
+      2. BTC/ETH 등락률 바 차트
+      3. BTC/ETH 가격 + 시총 90일 라인 차트
+
+    Returns: 저장 경로(str)
+    """
+    daily_dir = REPORTS_DIR / "daily"
+    daily_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = date or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else daily_dir / f"d3_crypto_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+
+    # ── 1. BTC 도미넌스 게이지 ───────────────────────────────────────────────
+    if "crypto_btc_dominance" in master.columns:
+        s = master["crypto_btc_dominance"].dropna()
+        ref_ts = pd.Timestamp(ref_date)
+        avail = s.index[s.index <= ref_ts]
+        if not avail.empty:
+            dom_val = float(s.loc[avail[-1]])
+            fig_dom = plot_gauge(dom_val, title="BTC 도미넌스", low_label="알트 우세", high_label="BTC 독주")
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="BTC 도미넌스",
+                chart_html=_fig_to_html(fig_dom),
+            ))
+
+    # ── 2. BTC/ETH 등락률 바 차트 ───────────────────────────────────────────
+    crypto_ret_cols = [c for c in ["crypto_btc_close", "crypto_eth_close"] if c in master.columns]
+    if crypto_ret_cols:
+        fig_ret = plot_daily_returns(master, date=ref_date, cols=crypto_ret_cols)
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="BTC / ETH 등락률 (전일 대비)",
+            chart_html=_fig_to_html(fig_ret),
+        ))
+
+    # ── 3. 90일 가격 + 시총 라인 차트 ───────────────────────────────────────
+    cutoff = pd.Timestamp(ref_date) - pd.Timedelta(days=90)
+    crypto_price_cols = [c for c in ["crypto_btc_close", "crypto_eth_close"] if c in master.columns]
+    mcap_col = "crypto_total_mcap"
+
+    if crypto_price_cols:
+        df_c = master[crypto_price_cols].loc[master.index >= cutoff].dropna(how="all")
+        if not df_c.empty:
+            fig_price = go.Figure()
+            for col in crypto_price_cols:
+                label = col.replace("crypto_", "").replace("_close", "").upper()
+                s = df_c[col].dropna()
+                fig_price.add_trace(go.Scatter(x=s.index, y=s.values, mode="lines", name=label))
+
+            if mcap_col in master.columns:
+                mcap = master[mcap_col].loc[master.index >= cutoff].dropna()
+                if not mcap.empty:
+                    fig_price.add_trace(go.Scatter(
+                        x=mcap.index, y=mcap.values / 1e9,
+                        mode="lines", name="시총(십억 USD)",
+                        yaxis="y2", line=dict(dash="dot"),
+                    ))
+                    fig_price.update_layout(
+                        yaxis2=dict(title="시총 (십억 USD)", overlaying="y", side="right"),
+                    )
+
+            fig_price.update_layout(
+                title="암호화폐 가격 추이 (최근 90일)",
+                hovermode="x unified",
+            )
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="가격 및 시총 추이",
+                chart_html=_fig_to_html(fig_price),
+            ))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"암호화폐 스냅샷 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_d3_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_w3_report  (W-3 크립토 vs 전통자산 롤링 상관)
+# ---------------------------------------------------------------------------
+
+def build_w3_report(
+    master: pd.DataFrame,
+    week_end: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    W-3 크립토 vs 전통자산 롤링 상관관계 주간 리포트.
+
+    포함 섹션:
+      1. BTC-S&P500 rolling 30일 Spearman
+      2. BTC-Gold rolling 30일 Spearman
+      3. BTC-VIX rolling 30일 Spearman
+      4. 현재 상관계수 요약 테이블
+
+    Returns: 저장 경로(str)
+    """
+    weekly_dir = REPORTS_DIR / "weekly"
+    weekly_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = week_end or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else weekly_dir / f"w3_crypto_corr_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+    summary_rows: list[tuple] = []
+
+    pairs = [
+        ("crypto_btc_close", "us_sp500_close",  "BTC vs S&P500"),
+        ("crypto_btc_close", "cmd_gold_close",  "BTC vs Gold"),
+        ("crypto_btc_close", "alt_vix_close",   "BTC vs VIX"),
+    ]
+
+    for col_a, col_b, label in pairs:
+        if col_a not in master.columns or col_b not in master.columns:
+            continue
+        sa = master[col_a].dropna()
+        sb = master[col_b].dropna()
+        fig = plot_rolling_correlation(sa, sb, window=30, title=f"{label} — Rolling 30일 Spearman")
+        sections.append(_SECTION_TEMPLATE.format(heading=label, chart_html=_fig_to_html(fig)))
+
+        # 현재 상관계수 계산
+        from scipy import stats as scipy_stats
+        common = pd.concat([sa.rename("a"), sb.rename("b")], axis=1).dropna()
+        if len(common) >= 30:
+            sub = common.tail(30)
+            rho, pval = scipy_stats.spearmanr(sub["a"], sub["b"])
+            summary_rows.append((label, f"{rho:.3f}", f"{pval:.3f}",
+                                  "유의" if pval < 0.05 else "비유의"))
+
+    if summary_rows:
+        tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+               "<tr style='background:#ecf0f1'><th style='padding:6px 12px;text-align:left'>자산 쌍</th>"
+               "<th style='padding:6px 12px;text-align:right'>Spearman ρ (30일)</th>"
+               "<th style='padding:6px 12px;text-align:right'>p-value</th>"
+               "<th style='padding:6px 12px;text-align:right'>유의성</th></tr>")
+        for i, (lbl, rho, pval, sig) in enumerate(summary_rows):
+            bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+            color = "#e74c3c" if float(rho) < 0 else "#2ecc71"
+            tbl += (f"<tr style='background:{bg}'><td style='padding:6px 12px'>{lbl}</td>"
+                    f"<td style='padding:6px 12px;text-align:right;color:{color};font-weight:bold'>{rho}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>{pval}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>{sig}</td></tr>")
+        tbl += "</table>"
+        sections.append(_SECTION_TEMPLATE.format(heading="현재 상관계수 요약 (최근 30일)", chart_html=tbl))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"크립토 vs 전통자산 롤링 상관 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_w3_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_w4_report  (W-4 국내 금리·환율·KOSPI 3각 관계)
+# ---------------------------------------------------------------------------
+
+def build_w4_report(
+    master: pd.DataFrame,
+    week_end: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    W-4 국내 금리·환율·KOSPI 3각 관계 주간 리포트.
+
+    포함 섹션:
+      1~3. 각 쌍 rolling 30일 Spearman 라인 차트
+      4. 현재 상관계수 요약 테이블
+
+    Returns: 저장 경로(str)
+    """
+    weekly_dir = REPORTS_DIR / "weekly"
+    weekly_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = week_end or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else weekly_dir / f"w4_kospi_triangle_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+    summary_rows: list[tuple] = []
+
+    pairs = [
+        ("kr_kospi_close", "fx_krw_usd_close", "KOSPI vs USD/KRW"),
+        ("kr_kospi_close", "rate_us10y",        "KOSPI vs 미 10년 금리"),
+        ("fx_krw_usd_close", "rate_us10y",      "USD/KRW vs 미 10년 금리"),
+    ]
+
+    for col_a, col_b, label in pairs:
+        if col_a not in master.columns or col_b not in master.columns:
+            log.warning("build_w4_report: 컬럼 없음 — %s 또는 %s", col_a, col_b)
+            continue
+        sa = master[col_a].dropna()
+        sb = master[col_b].dropna()
+        fig = plot_rolling_correlation(sa, sb, window=30, title=f"{label} — Rolling 30일 Spearman")
+        sections.append(_SECTION_TEMPLATE.format(heading=label, chart_html=_fig_to_html(fig)))
+
+        from scipy import stats as scipy_stats
+        common = pd.concat([sa.rename("a"), sb.rename("b")], axis=1).dropna()
+        if len(common) >= 30:
+            sub = common.tail(30)
+            rho, pval = scipy_stats.spearmanr(sub["a"], sub["b"])
+            summary_rows.append((label, f"{rho:.3f}", f"{pval:.3f}",
+                                  "유의" if pval < 0.05 else "비유의"))
+
+    if summary_rows:
+        tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+               "<tr style='background:#ecf0f1'><th style='padding:6px 12px;text-align:left'>자산 쌍</th>"
+               "<th style='padding:6px 12px;text-align:right'>Spearman ρ (30일)</th>"
+               "<th style='padding:6px 12px;text-align:right'>p-value</th>"
+               "<th style='padding:6px 12px;text-align:right'>유의성</th></tr>")
+        for i, (lbl, rho, pval, sig) in enumerate(summary_rows):
+            bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+            color = "#e74c3c" if float(rho) < 0 else "#2ecc71"
+            tbl += (f"<tr style='background:{bg}'><td style='padding:6px 12px'>{lbl}</td>"
+                    f"<td style='padding:6px 12px;text-align:right;color:{color};font-weight:bold'>{rho}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>{pval}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>{sig}</td></tr>")
+        tbl += "</table>"
+        sections.append(_SECTION_TEMPLATE.format(heading="현재 상관계수 요약 (최근 30일)", chart_html=tbl))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"국내 금리·환율·KOSPI 3각 관계 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_w4_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_m3_report  (M-3 미국 경기 사이클 좌표)
+# ---------------------------------------------------------------------------
+
+def build_m3_report(
+    master: pd.DataFrame,
+    month_end: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    M-3 미국 경기 사이클 좌표 월간 리포트.
+
+    포함 섹션:
+      1. PMI-CPI 사분면 이동 경로 (12개월)
+      2. 6개 거시 지표 Z-Score 레이더 차트
+      3. 현재 국면 + 권장 자산 카드
+
+    Returns: 저장 경로(str)
+    """
+    monthly_dir = REPORTS_DIR / "monthly"
+    monthly_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = month_end or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else monthly_dir / f"m3_cycle_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+    current_regime_name = ""
+    regime_color = "#95a5a6"
+
+    # ── 1. PMI-CPI 사분면 이동 경로 ─────────────────────────────────────────
+    pmi_col = next((c for c in master.columns if "pmi" in c), None)
+    cpi_col = next((c for c in master.columns if "cpi" in c), None)
+
+    if pmi_col and cpi_col:
+        fig_path = plot_regime_path(master[pmi_col], master[cpi_col], lookback_months=12)
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="경기 사이클 좌표 (최근 12개월 이동 경로)",
+            chart_html=_fig_to_html(fig_path),
+        ))
+
+        # 현재 국면 파악
+        try:
+            from analysis.regime import classify_regime
+            rs = classify_regime(master[pmi_col], master[cpi_col]).dropna()
+            if not rs.empty:
+                current_regime_name = rs.iloc[-1]
+                regime_color = _REGIME_COLORS.get(current_regime_name, "#95a5a6")
+        except Exception:
+            pass
+
+    # ── 2. 6개 거시 지표 Z-Score 레이더 차트 ────────────────────────────────
+    radar_cols = {
+        "macro_pmi_us":       "PMI",
+        "macro_cpi":          "CPI",
+        "macro_gdp_us":       "GDP",
+        "macro_unemployment": "실업률",
+        "rate_fed":           "기준금리",
+        "macro_m2_us":        "M2",
+    }
+    available = {k: v for k, v in radar_cols.items() if k in master.columns}
+
+    if len(available) >= 3:
+        ref_ts = pd.Timestamp(ref_date)
+        z_scores: dict[str, float] = {}
+        for col, label in available.items():
+            s = master[col].dropna()
+            avail_idx = s.index[s.index <= ref_ts]
+            if avail_idx.empty or s.std() == 0:
+                continue
+            val = float(s.loc[avail_idx[-1]])
+            z = (val - s.mean()) / s.std()
+            z_scores[label] = round(float(z), 2)
+
+        # nan/inf 제거
+        import math
+        z_scores = {k: v for k, v in z_scores.items() if math.isfinite(v)}
+
+        if z_scores:
+            cats = list(z_scores.keys()) + [list(z_scores.keys())[0]]
+            vals = list(z_scores.values()) + [list(z_scores.values())[0]]
+            # hex → rgba 변환 (Plotly fillcolor 호환)
+            def _hex_to_rgba(hex_color: str, alpha: float = 0.2) -> str:
+                h = hex_color.lstrip("#")
+                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                return f"rgba({r},{g},{b},{alpha})"
+
+            fig_radar = go.Figure(go.Scatterpolar(
+                r=vals, theta=cats, fill="toself",
+                fillcolor=_hex_to_rgba(regime_color, 0.2),
+                line=dict(color=regime_color),
+            ))
+            fig_radar.update_layout(
+                polar=dict(radialaxis=dict(visible=True, range=[-3, 3])),
+                title="주요 거시 지표 Z-Score (현재 수준)",
+                showlegend=False,
+                height=400,
+            )
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="거시 지표 Z-Score 레이더",
+                chart_html=_fig_to_html(fig_radar),
+            ))
+
+    # ── 3. 현재 국면 카드 ───────────────────────────────────────────────────
+    if current_regime_name:
+        from visualization.report import _REGIME_ASSETS_KO
+        recommended = ", ".join(_REGIME_ASSETS_KO.get(current_regime_name, []))
+        regime_card = (
+            f"<div style='padding:16px 24px;background:{regime_color}22;"
+            f"border-left:6px solid {regime_color};border-radius:4px'>"
+            f"<div style='font-size:1.3em;font-weight:bold;color:{regime_color}'>"
+            f"현재 국면: {current_regime_name}</div>"
+            f"<div style='margin-top:8px;color:#555'>권장 자산: {recommended}</div>"
+            "</div>"
+        )
+        sections.append(_SECTION_TEMPLATE.format(heading="현재 국면 요약", chart_html=regime_card))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"미국 경기 사이클 좌표 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_m3_report: saved to %s", out)
+    return str(out.resolve())

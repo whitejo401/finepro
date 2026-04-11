@@ -185,12 +185,9 @@ def plot_rolling_correlation(
         rho, _ = stats.spearmanr(sub["a"], sub["b"])
         return float(rho)
 
-    rolling_corr = combined.rolling(window).apply(
-        lambda _: None  # placeholder — 아래에서 수동 계산
-    )["a"]  # 사용하지 않음
-
     # rolling spearman 수동 계산 (pandas rolling은 spearman 미지원)
-    rho_values: list[float | None] = [None] * (window - 1)
+    import math
+    rho_values: list[float] = [math.nan] * (window - 1)
     for i in range(window - 1, len(combined)):
         sub = combined.iloc[i - window + 1 : i + 1]
         rho, _ = stats.spearmanr(sub["a"], sub["b"])
@@ -391,6 +388,226 @@ def plot_regime_timeline(
         legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="left", x=0),
         margin=dict(l=40, r=40, t=80, b=40),
         height=200,
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# plot_gauge
+# ---------------------------------------------------------------------------
+
+_GAUGE_STEPS = [
+    {"range": [0, 20],  "color": "#e74c3c"},
+    {"range": [20, 40], "color": "#e67e22"},
+    {"range": [40, 60], "color": "#f1c40f"},
+    {"range": [60, 80], "color": "#2ecc71"},
+    {"range": [80, 100],"color": "#27ae60"},
+]
+
+
+def plot_gauge(
+    value: float,
+    title: str,
+    low_label: str = "극공포",
+    high_label: str = "극탐욕",
+) -> go.Figure:
+    """
+    0~100 반원형 게이지 차트.
+
+    Args:
+        value     : 0~100 사이 값 (감성 점수는 호출 전 변환 필요)
+        title     : 게이지 제목
+        low_label : 0 쪽 레이블
+        high_label: 100 쪽 레이블
+    Returns:
+        go.Figure (indicator gauge)
+    """
+    value = float(max(0.0, min(100.0, value)))
+
+    if value < 20:
+        level, needle_color = low_label, "#e74c3c"
+    elif value < 40:
+        level, needle_color = "부정", "#e67e22"
+    elif value < 60:
+        level, needle_color = "중립", "#f1c40f"
+    elif value < 80:
+        level, needle_color = "긍정", "#2ecc71"
+    else:
+        level, needle_color = high_label, "#27ae60"
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number+delta",
+        value=value,
+        title={"text": f"{title}<br><span style='font-size:0.8em;color:{needle_color}'>{level}</span>"},
+        gauge={
+            "axis": {"range": [0, 100], "tickwidth": 1, "tickcolor": "#7f8c8d"},
+            "bar": {"color": needle_color, "thickness": 0.25},
+            "bgcolor": "white",
+            "borderwidth": 1,
+            "bordercolor": "#bdc3c7",
+            "steps": _GAUGE_STEPS,
+            "threshold": {
+                "line": {"color": "#2c3e50", "width": 3},
+                "thickness": 0.75,
+                "value": value,
+            },
+        },
+        number={"suffix": "", "font": {"size": 28}},
+    ))
+
+    fig.update_layout(
+        margin=dict(l=20, r=20, t=60, b=10),
+        height=220,
+        annotations=[
+            dict(x=0.05, y=0.1, text=low_label, showarrow=False,
+                 font=dict(size=11, color="#e74c3c"), xref="paper", yref="paper"),
+            dict(x=0.95, y=0.1, text=high_label, showarrow=False,
+                 font=dict(size=11, color="#27ae60"), xref="paper", yref="paper"),
+        ],
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# plot_regime_path
+# ---------------------------------------------------------------------------
+
+def plot_regime_path(
+    pmi_series: pd.Series,
+    cpi_series: pd.Series,
+    lookback_months: int = 12,
+    title: str = "미국 경기 사이클 좌표 (PMI-CPI)",
+) -> go.Figure:
+    """
+    PMI-CPI 2차원 사분면 플롯 + 최근 N개월 이동 경로 (M-3용).
+
+    축: PMI 변화율 Z-Score (x), CPI 변화율 Z-Score (y)
+    사분면: reflation(우하), overheat(우상), stagflation(좌상), deflation(좌하)
+
+    Args:
+        pmi_series     : PMI 시계열 (월별)
+        cpi_series     : CPI 시계열 (월별)
+        lookback_months: 경로 표시 개월 수
+        title          : 차트 제목
+    Returns:
+        go.Figure
+    """
+    if pmi_series.dropna().empty or cpi_series.dropna().empty:
+        log.warning("plot_regime_path: PMI 또는 CPI 데이터 없음")
+        return go.Figure()
+
+    pmi_a, cpi_a = pmi_series.align(cpi_series, join="inner")
+    combined = pd.concat([pmi_a.rename("pmi"), cpi_a.rename("cpi")], axis=1).dropna()
+
+    if len(combined) < 7:
+        log.warning("plot_regime_path: 데이터 부족 (%d행)", len(combined))
+        return go.Figure()
+
+    # 6개월 변화율
+    pmi_chg = combined["pmi"].diff(6).dropna()
+    cpi_chg = combined["cpi"].diff(6).dropna()
+
+    # Z-Score 정규화
+    def _zscore(s: pd.Series) -> pd.Series:
+        std = s.std()
+        if std == 0:
+            return s * 0
+        return (s - s.mean()) / std
+
+    pmi_z = _zscore(pmi_chg)
+    cpi_z = _zscore(cpi_chg)
+
+    df_path = pd.concat([pmi_z.rename("pmi_z"), cpi_z.rename("cpi_z")], axis=1).dropna()
+
+    # 최근 lookback_months 개월
+    df_recent = df_path.tail(lookback_months)
+    if df_recent.empty:
+        return go.Figure()
+
+    n = len(df_recent)
+    xs = df_recent["pmi_z"].values
+    ys = df_recent["cpi_z"].values
+    dates = [t.strftime("%Y-%m") for t in df_recent.index]
+
+    # 점 크기: 오래된 것 작게, 최신 크게
+    sizes = [6 + i * (18 / max(n - 1, 1)) for i in range(n)]
+    colors = [f"rgba(44,62,80,{0.2 + 0.8 * i / max(n - 1, 1)})" for i in range(n)]
+
+    fig = go.Figure()
+
+    # 사분면 배경 (shapes)
+    axis_range = max(abs(xs).max(), abs(ys).max()) * 1.4 + 0.5
+    quad_configs = [
+        (0, axis_range, 0, axis_range, "#e67e22", "overheat"),       # 우상
+        (-axis_range, 0, 0, axis_range, "#e74c3c", "stagflation"),   # 좌상
+        (-axis_range, 0, -axis_range, 0, "#3498db", "deflation"),    # 좌하
+        (0, axis_range, -axis_range, 0, "#2ecc71", "reflation"),     # 우하
+    ]
+    for x0, x1, y0, y1, color, label in quad_configs:
+        fig.add_shape(type="rect", x0=x0, x1=x1, y0=y0, y1=y1,
+                      fillcolor=color, opacity=0.08, line_width=0)
+        fig.add_annotation(
+            x=(x0 + x1) / 2, y=(y0 + y1) / 2,
+            text=label, showarrow=False,
+            font=dict(size=13, color=color, family="Arial Black"),
+            opacity=0.5,
+        )
+
+    # 경로 라인
+    fig.add_trace(go.Scatter(
+        x=xs, y=ys,
+        mode="lines",
+        line=dict(color="#95a5a6", width=1.5, dash="dot"),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+
+    # 포인트
+    fig.add_trace(go.Scatter(
+        x=xs, y=ys,
+        mode="markers+text",
+        text=[d if i == n - 1 else "" for i, d in enumerate(dates)],
+        textposition="top right",
+        marker=dict(size=sizes, color=colors, line=dict(width=1, color="#2c3e50")),
+        hovertemplate=[f"{d}<br>PMI_z: {x:.2f}<br>CPI_z: {y:.2f}<extra></extra>"
+                       for d, x, y in zip(dates, xs, ys)],
+        showlegend=False,
+    ))
+
+    # 최신 점 강조
+    current_regime_name = ""
+    if ys[-1] >= 0 and xs[-1] >= 0:
+        current_regime_name = "overheat"
+    elif ys[-1] >= 0 and xs[-1] < 0:
+        current_regime_name = "stagflation"
+    elif ys[-1] < 0 and xs[-1] < 0:
+        current_regime_name = "deflation"
+    else:
+        current_regime_name = "reflation"
+
+    latest_color = _REGIME_COLORS.get(current_regime_name, "#2c3e50")
+    fig.add_trace(go.Scatter(
+        x=[xs[-1]], y=[ys[-1]],
+        mode="markers",
+        marker=dict(size=16, color=latest_color, symbol="star",
+                    line=dict(width=2, color="#fff")),
+        name=f"현재 ({dates[-1]})",
+        hovertemplate=f"{dates[-1]}<br>PMI_z: {xs[-1]:.2f}<br>CPI_z: {ys[-1]:.2f}<extra></extra>",
+    ))
+
+    # 중심선
+    fig.add_hline(y=0, line_dash="dash", line_color="#7f8c8d", line_width=1)
+    fig.add_vline(x=0, line_dash="dash", line_color="#7f8c8d", line_width=1)
+
+    fig.update_layout(
+        title=title,
+        xaxis=dict(title="PMI 변화율 Z-Score (↑성장 개선)", zeroline=False,
+                   range=[-axis_range, axis_range]),
+        yaxis=dict(title="CPI 변화율 Z-Score (↑인플레 상승)", zeroline=False,
+                   range=[-axis_range, axis_range]),
+        hovermode="closest",
+        margin=dict(l=60, r=40, t=80, b=60),
+        height=480,
     )
     return fig
 
