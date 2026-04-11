@@ -19,7 +19,9 @@ def parse_args():
     parser.add_argument(
         "--mode",
         choices=["daily", "weekly", "monthly", "all",
-                 "d1", "d2", "d3", "w2", "w3", "w4", "m1", "m3"],
+                 "d1", "d2", "d3", "d4", "d5", "d6",
+                 "w2", "w3", "w4", "w5", "w6",
+                 "m1", "m3", "m5", "m6"],
         default="all",
         help="생성할 리포트 종류",
     )
@@ -99,6 +101,26 @@ def main():
     except Exception as e:
         log.warning("news sentiment collector failed: %s", e)
 
+    # ── 7. 고래 온체인 (Whale Alert + Glassnode) ────────────────────────────
+    try:
+        from collectors.global_.whale import get_whale_dataset
+        df_whale = get_whale_dataset(start=start, end=end, use_cache=use_cache)
+        if not df_whale.empty:
+            frames.append(df_whale)
+            log.info("whale data: %d rows x %d cols", *df_whale.shape)
+    except Exception as e:
+        log.warning("whale collector failed: %s", e)
+
+    # ── 8. 비트코인 ETF (yfinance) ─────────────────────────────────────────
+    try:
+        from collectors.global_.institutions import get_bitcoin_etf_data
+        df_etf = get_bitcoin_etf_data(start=start, end=end, use_cache=use_cache)
+        if not df_etf.empty:
+            frames.append(df_etf)
+            log.info("btc etf: %d rows x %d cols", *df_etf.shape)
+    except Exception as e:
+        log.warning("btc etf collector failed: %s", e)
+
     if not frames:
         log.error("No data collected — check API keys and network.")
         return
@@ -120,31 +142,55 @@ def main():
         "d1": ("build_daily_report",   "일간 시황"),
         "d2": ("build_d2_report",      "연준·감성"),
         "d3": ("build_d3_report",      "암호화폐"),
+        "d4": ("build_d4_report",      "KOSPI 예측"),
+        "d5": ("build_d5_report",      "미국→KOSPI 선행"),
+        "d6": ("build_d6_report",      "고래·기관 스냅샷"),
         "w2": ("build_weekly_report",  "주간 국면"),
         "w3": ("build_w3_report",      "크립토 상관"),
         "w4": ("build_w4_report",      "KOSPI 3각"),
+        "w5": ("build_w5_report",      "예측 적중률"),
+        "w6": ("build_w6_report",      "기관 포트폴리오"),
         "m1": ("build_report",         "월간 종합"),
         "m3": ("build_m3_report",      "경기 사이클"),
+        "m5": ("build_m5_report",      "국면별 자산 성과"),
+        "m6": ("build_m6_report",      "공포-탐욕 지수"),
     }
 
     # mode 별 실행 대상 결정
     if mode == "all":
         targets = list(_REPORT_MAP.keys())
     elif mode == "daily":
-        targets = ["d1", "d2", "d3"]
+        targets = ["d1", "d2", "d3", "d4", "d5", "d6"]
     elif mode == "weekly":
-        targets = ["w2", "w3", "w4"]
+        targets = ["w2", "w3", "w4", "w5", "w6"]
     elif mode == "monthly":
-        targets = ["m1", "m3"]
+        targets = ["m1", "m3", "m5", "m6"]
     else:
         targets = [mode]
+
+    # 기관 데이터 (d6, w6에서 사용 — 한 번만 수집)
+    btc_companies_df = None
+    sec_13f_df = None
+    if any(t in targets for t in ["d6", "w6"]):
+        try:
+            from collectors.global_.institutions import get_public_company_holdings, get_sec_13f_crypto
+            btc_companies_df = get_public_company_holdings("bitcoin", use_cache=use_cache)
+            sec_13f_df = get_sec_13f_crypto(use_cache=use_cache)
+        except Exception as e:
+            log.warning("institution data failed: %s", e)
 
     import visualization.report as _rpt
     for key in targets:
         func_name, label = _REPORT_MAP[key]
         try:
             func = getattr(_rpt, func_name)
-            path = func(master)
+            # d6, w6은 추가 인자 전달
+            if key == "d6":
+                path = func(master, btc_companies_df=btc_companies_df)
+            elif key == "w6":
+                path = func(master, btc_companies_df=btc_companies_df, sec_13f_df=sec_13f_df)
+            else:
+                path = func(master)
             log.info("%s 리포트: %s", label, path)
             generated.append(path)
         except Exception as e:

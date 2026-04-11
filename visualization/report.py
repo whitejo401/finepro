@@ -1083,3 +1083,1034 @@ def build_m3_report(
     out.write_text(html, encoding="utf-8")
     log.info("build_m3_report: saved to %s", out)
     return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_d4_report  (D-4 오늘 KOSPI 예상)
+# ---------------------------------------------------------------------------
+
+def build_d4_report(
+    master: pd.DataFrame,
+    date: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    D-4 오늘 KOSPI 방향 예측 HTML 리포트.
+
+    포함 섹션:
+      1. 신호 신호등 카드 (상승/하락/중립)
+      2. 로지스틱 상승 확률 게이지
+      3. 상위 선행 변수 상관 테이블
+      4. 개별 변수 부호 투표 현황
+
+    Returns: 저장 경로(str)
+    """
+    daily_dir = REPORTS_DIR / "daily"
+    daily_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = date or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else daily_dir / f"d4_kospi_pred_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+
+    try:
+        from analysis.prediction import build_today_prediction
+        pred = build_today_prediction(master)
+    except Exception as e:
+        log.warning("build_d4_report: 예측 실패: %s", e)
+        pred = {}
+
+    signal = pred.get("signal", 0)
+    prob_up = pred.get("prob_up")
+    top_features = pred.get("top_features")
+    vote_detail = pred.get("vote_detail", {})
+
+    # ── 1. 신호 신호등 카드 ─────────────────────────────────────────────────
+    if signal == 1:
+        sig_color, sig_label, sig_icon = "#2ecc71", "상승 예상", "▲"
+    elif signal == -1:
+        sig_color, sig_label, sig_icon = "#e74c3c", "하락 예상", "▼"
+    else:
+        sig_color, sig_label, sig_icon = "#f39c12", "중립", "—"
+
+    signal_card = (
+        f"<div style='text-align:center;padding:24px;background:{sig_color}22;"
+        f"border:3px solid {sig_color};border-radius:12px;margin-bottom:16px'>"
+        f"<div style='font-size:3em;color:{sig_color}'>{sig_icon}</div>"
+        f"<div style='font-size:1.6em;font-weight:bold;color:{sig_color};margin-top:8px'>{sig_label}</div>"
+        f"<div style='color:#555;margin-top:8px'>기준일: {pred.get('ref_date', ref_date)}</div>"
+        f"</div>"
+    )
+    sections.append(_SECTION_TEMPLATE.format(heading="오늘 KOSPI 방향 예측", chart_html=signal_card))
+
+    # ── 2. 상승 확률 게이지 ─────────────────────────────────────────────────
+    if prob_up is not None:
+        fig_gauge = plot_gauge(
+            prob_up * 100,
+            title="KOSPI 상승 확률 (로지스틱)",
+            low_label="하락",
+            high_label="상승",
+        )
+        sections.append(_SECTION_TEMPLATE.format(
+            heading=f"상승 확률: {prob_up:.1%}",
+            chart_html=_fig_to_html(fig_gauge),
+        ))
+
+    # ── 3. 상위 선행 변수 상관 테이블 ─────────────────────────────────────
+    if top_features is not None and not top_features.empty:
+        tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+               "<tr style='background:#ecf0f1'>"
+               "<th style='padding:6px 12px;text-align:left'>변수</th>"
+               "<th style='padding:6px 12px;text-align:right'>Spearman ρ</th>"
+               "<th style='padding:6px 12px;text-align:right'>p-value</th>"
+               "<th style='padding:6px 12px;text-align:right'>선행 일수</th>"
+               "</tr>")
+        for i, row in top_features.iterrows():
+            bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+            rho_val = row['spearman_rho']
+            color = "#2ecc71" if rho_val > 0 else "#e74c3c"
+            tbl += (f"<tr style='background:{bg}'>"
+                    f"<td style='padding:6px 12px'>{row['feature']}</td>"
+                    f"<td style='padding:6px 12px;text-align:right;color:{color};font-weight:bold'>{rho_val:+.4f}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>{row['p_value']:.4f}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>{row['lag']}일</td>"
+                    "</tr>")
+        tbl += "</table>"
+        sections.append(_SECTION_TEMPLATE.format(heading="상위 선행 변수 (Spearman 상관)", chart_html=tbl))
+
+    # ── 4. 개별 변수 투표 현황 ───────────────────────────────────────────────
+    if vote_detail:
+        vote_rows = ""
+        for col, sign in vote_detail.items():
+            icon = "▲" if sign > 0 else ("▼" if sign < 0 else "—")
+            color = "#2ecc71" if sign > 0 else ("#e74c3c" if sign < 0 else "#f39c12")
+            vote_rows += (
+                f"<div style='display:flex;justify-content:space-between;padding:6px 12px;"
+                f"border-bottom:1px solid #eee'>"
+                f"<span>{col}</span>"
+                f"<span style='color:{color};font-weight:bold'>{icon}</span>"
+                f"</div>"
+            )
+        vote_html = f"<div style='border:1px solid #ddd;border-radius:6px'>{vote_rows}</div>"
+        sections.append(_SECTION_TEMPLATE.format(heading="개별 변수 전일 방향 투표", chart_html=vote_html))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"오늘 KOSPI 방향 예측 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_d4_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_d5_report  (D-5 미국→KOSPI 선행 분석)
+# ---------------------------------------------------------------------------
+
+def build_d5_report(
+    master: pd.DataFrame,
+    date: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    D-5 미국→KOSPI 선행 분석 HTML 리포트.
+
+    포함 섹션:
+      1. OLS 갭 예측 vs 실제 라인 차트 (최근 60일)
+      2. R² 추이 라인 차트
+      3. 전일 미국 시장 요약 (S&P500, NASDAQ, VIX, 환율)
+
+    Returns: 저장 경로(str)
+    """
+    daily_dir = REPORTS_DIR / "daily"
+    daily_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = date or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else daily_dir / f"d5_kospi_lead_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+
+    # ── 1. OLS 갭 예측 ──────────────────────────────────────────────────────
+    try:
+        from analysis.prediction import rolling_ols_gap
+        ols_df = rolling_ols_gap(master)
+        if not ols_df.empty:
+            cutoff = pd.Timestamp(ref_date) - pd.Timedelta(days=60)
+            ols_recent = ols_df[ols_df.index >= cutoff]
+            if not ols_recent.empty:
+                fig_gap = go.Figure()
+                fig_gap.add_trace(go.Scatter(
+                    x=ols_recent.index, y=ols_recent["actual_gap"] * 100,
+                    mode="lines+markers", name="실제 수익률 (%)",
+                    line=dict(color="#3498db"), marker=dict(size=4),
+                ))
+                fig_gap.add_trace(go.Scatter(
+                    x=ols_recent.index, y=ols_recent["predicted_gap"] * 100,
+                    mode="lines", name="OLS 예측 (%)",
+                    line=dict(color="#e74c3c", dash="dash"),
+                ))
+                fig_gap.add_hline(y=0, line_dash="dot", line_color="#bdc3c7")
+                fig_gap.update_layout(
+                    title="KOSPI 갭 예측 vs 실제 (OLS, 최근 60일)",
+                    yaxis_title="일간 수익률 (%)",
+                    hovermode="x unified",
+                )
+                sections.append(_SECTION_TEMPLATE.format(
+                    heading="OLS 갭 예측 vs 실제",
+                    chart_html=_fig_to_html(fig_gap),
+                ))
+
+                # R² 추이
+                fig_r2 = go.Figure(go.Scatter(
+                    x=ols_recent.index, y=ols_recent["r_squared"],
+                    mode="lines+markers", name="R²",
+                    line=dict(color="#9b59b6"), marker=dict(size=4),
+                ))
+                fig_r2.update_layout(
+                    title="OLS 모델 R² 추이",
+                    yaxis=dict(title="R²", range=[0, 1]),
+                    hovermode="x",
+                )
+                sections.append(_SECTION_TEMPLATE.format(
+                    heading="모델 설명력 (R²)",
+                    chart_html=_fig_to_html(fig_r2),
+                ))
+    except Exception as e:
+        log.warning("build_d5_report: OLS 갭 실패: %s", e)
+
+    # ── 2. 전일 미국 시장 요약 ───────────────────────────────────────────────
+    us_cols = [
+        ("us_sp500_close",   "S&P 500"),
+        ("us_nasdaq_close",  "NASDAQ"),
+        ("alt_vix_close",    "VIX"),
+        ("fx_krw_usd_close", "USD/KRW"),
+        ("rate_us10y",       "미 10년 금리"),
+    ]
+    us_rows = []
+    ref_ts = pd.Timestamp(ref_date)
+    for col, label in us_cols:
+        if col not in master.columns:
+            continue
+        s = master[col].dropna()
+        avail = s.index[s.index <= ref_ts]
+        if avail.empty:
+            continue
+        val = float(s.loc[avail[-1]])
+        prev = s.index[s.index < avail[-1]]
+        if not prev.empty:
+            prev_val = float(s.loc[prev[-1]])
+            chg_pct = (val - prev_val) / abs(prev_val) * 100 if prev_val != 0 else 0
+            chg_str = f"{chg_pct:+.2f}%"
+        else:
+            chg_str = "—"
+        us_rows.append((label, f"{val:,.2f}", chg_str, avail[-1].strftime("%Y-%m-%d")))
+
+    if us_rows:
+        tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+               "<tr style='background:#ecf0f1'>"
+               "<th style='padding:6px 12px;text-align:left'>지표</th>"
+               "<th style='padding:6px 12px;text-align:right'>현재값</th>"
+               "<th style='padding:6px 12px;text-align:right'>전일 대비</th>"
+               "<th style='padding:6px 12px;text-align:right'>기준일</th>"
+               "</tr>")
+        for i, (lbl, val, chg, dt) in enumerate(us_rows):
+            bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+            if chg != "—":
+                try:
+                    chg_num = float(chg.replace("%", "").replace("+", ""))
+                    color = "#2ecc71" if chg_num > 0 else "#e74c3c"
+                except ValueError:
+                    color = "#333"
+            else:
+                color = "#333"
+            tbl += (f"<tr style='background:{bg}'>"
+                    f"<td style='padding:6px 12px'>{lbl}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>{val}</td>"
+                    f"<td style='padding:6px 12px;text-align:right;color:{color};font-weight:bold'>{chg}</td>"
+                    f"<td style='padding:6px 12px;text-align:right;color:#999'>{dt}</td>"
+                    "</tr>")
+        tbl += "</table>"
+        sections.append(_SECTION_TEMPLATE.format(heading="전일 미국 시장 마감 요약", chart_html=tbl))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"미국→KOSPI 선행 분석 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_d5_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_w5_report  (W-5 KOSPI 예측 적중률 리뷰)
+# ---------------------------------------------------------------------------
+
+def build_w5_report(
+    master: pd.DataFrame,
+    week_end: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    W-5 KOSPI 예측 적중률 리뷰 주간 리포트.
+
+    포함 섹션:
+      1. 누적 적중률 라인 차트
+      2. 최근 20일 예측 vs 실제 테이블
+      3. 적중률 요약 카드
+
+    Returns: 저장 경로(str)
+    """
+    weekly_dir = REPORTS_DIR / "weekly"
+    weekly_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = week_end or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else weekly_dir / f"w5_pred_accuracy_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+
+    try:
+        from analysis.prediction import load_prediction_log, rolling_logit_predict
+        pred_log = load_prediction_log()
+
+        # 로그가 없으면 master로 새로 계산
+        if pred_log.empty:
+            logit_df = rolling_logit_predict(master)
+            pred_log = logit_df if not logit_df.empty else pd.DataFrame()
+            if not pred_log.empty and "hit" not in pred_log.columns:
+                pred_log["hit"] = (pred_log["predicted"] == pred_log["actual"]).astype(int)
+            if not pred_log.empty and "cumulative_hit_rate" not in pred_log.columns:
+                valid = pred_log.dropna(subset=["hit"])
+                if not valid.empty:
+                    pred_log.loc[valid.index, "cumulative_hit_rate"] = valid["hit"].expanding().mean()
+
+        if not pred_log.empty:
+            valid_log = pred_log.dropna(subset=["hit"])
+
+            # ── 1. 누적 적중률 라인 차트 ─────────────────────────────────────
+            if "cumulative_hit_rate" in pred_log.columns:
+                hr_series = pred_log["cumulative_hit_rate"].dropna()
+                if not hr_series.empty:
+                    fig_hr = go.Figure()
+                    fig_hr.add_trace(go.Scatter(
+                        x=hr_series.index, y=hr_series.values * 100,
+                        mode="lines", name="누적 적중률 (%)",
+                        line=dict(color="#3498db", width=2),
+                    ))
+                    fig_hr.add_hline(y=50, line_dash="dot", line_color="#e74c3c",
+                                     annotation_text="랜덤 기준 (50%)")
+                    fig_hr.update_layout(
+                        title="KOSPI 방향 예측 누적 적중률",
+                        yaxis=dict(title="적중률 (%)", range=[30, 80]),
+                        hovermode="x",
+                    )
+                    sections.append(_SECTION_TEMPLATE.format(
+                        heading="누적 예측 적중률",
+                        chart_html=_fig_to_html(fig_hr),
+                    ))
+
+            # ── 2. 최근 20일 예측 vs 실제 테이블 ─────────────────────────────
+            recent = valid_log.tail(20)
+            if not recent.empty:
+                tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+                       "<tr style='background:#ecf0f1'>"
+                       "<th style='padding:6px 12px;text-align:left'>날짜</th>"
+                       "<th style='padding:6px 12px;text-align:right'>예측</th>"
+                       "<th style='padding:6px 12px;text-align:right'>실제</th>"
+                       "<th style='padding:6px 12px;text-align:right'>적중</th>")
+                if "prob_up" in recent.columns:
+                    tbl += "<th style='padding:6px 12px;text-align:right'>상승확률</th>"
+                tbl += "</tr>"
+
+                for dt, row in recent.iterrows():
+                    hit = int(row["hit"]) if "hit" in row and not pd.isna(row["hit"]) else None
+                    bg = "#f0fff4" if hit == 1 else ("#fff0f0" if hit == 0 else "#fff")
+                    pred_icon = "▲" if row.get("predicted", 0) == 1 else "▼"
+                    actual_icon = "▲" if row.get("actual", 0) == 1 else "▼"
+                    hit_icon = "O" if hit == 1 else ("X" if hit == 0 else "—")
+                    hit_color = "#2ecc71" if hit == 1 else ("#e74c3c" if hit == 0 else "#999")
+                    dt_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)
+                    tbl += (f"<tr style='background:{bg}'>"
+                            f"<td style='padding:6px 12px'>{dt_str}</td>"
+                            f"<td style='padding:6px 12px;text-align:right'>{pred_icon}</td>"
+                            f"<td style='padding:6px 12px;text-align:right'>{actual_icon}</td>"
+                            f"<td style='padding:6px 12px;text-align:right;color:{hit_color};font-weight:bold'>{hit_icon}</td>")
+                    if "prob_up" in recent.columns:
+                        prob = row.get("prob_up")
+                        prob_str = f"{prob:.1%}" if pd.notna(prob) else "—"
+                        tbl += f"<td style='padding:6px 12px;text-align:right'>{prob_str}</td>"
+                    tbl += "</tr>"
+                tbl += "</table>"
+                sections.append(_SECTION_TEMPLATE.format(heading="최근 20일 예측 결과", chart_html=tbl))
+
+            # ── 3. 적중률 요약 카드 ───────────────────────────────────────────
+            if not valid_log.empty:
+                total = len(valid_log)
+                hits = int(valid_log["hit"].sum())
+                hit_rate = hits / total if total > 0 else 0
+                color = "#2ecc71" if hit_rate >= 0.55 else ("#f39c12" if hit_rate >= 0.5 else "#e74c3c")
+                summary_card = (
+                    f"<div style='display:flex;gap:16px;flex-wrap:wrap'>"
+                    f"<div style='flex:1;min-width:140px;text-align:center;padding:16px;"
+                    f"background:{color}22;border:2px solid {color};border-radius:8px'>"
+                    f"<div style='font-size:2em;font-weight:bold;color:{color}'>{hit_rate:.1%}</div>"
+                    f"<div style='color:#555;margin-top:4px'>전체 적중률</div>"
+                    f"</div>"
+                    f"<div style='flex:1;min-width:140px;text-align:center;padding:16px;"
+                    f"background:#ecf0f122;border:2px solid #bdc3c7;border-radius:8px'>"
+                    f"<div style='font-size:2em;font-weight:bold;color:#2c3e50'>{total}</div>"
+                    f"<div style='color:#555;margin-top:4px'>예측 건수</div>"
+                    f"</div>"
+                    f"<div style='flex:1;min-width:140px;text-align:center;padding:16px;"
+                    f"background:#2ecc7122;border:2px solid #2ecc71;border-radius:8px'>"
+                    f"<div style='font-size:2em;font-weight:bold;color:#2ecc71'>{hits}</div>"
+                    f"<div style='color:#555;margin-top:4px'>적중 건수</div>"
+                    f"</div>"
+                    f"</div>"
+                )
+                sections.append(_SECTION_TEMPLATE.format(heading="예측 정확도 요약", chart_html=summary_card))
+
+    except Exception as e:
+        log.warning("build_w5_report: 예측 로그 로드 실패: %s", e)
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="예측 데이터 없음",
+            chart_html="<p>예측 로그가 없거나 데이터가 부족합니다.</p>",
+        ))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"KOSPI 예측 적중률 리뷰 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_w5_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_m5_report  (M-5 국면별 자산 성과 히트맵)
+# ---------------------------------------------------------------------------
+
+def build_m5_report(
+    master: pd.DataFrame,
+    month_end: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    M-5 국면별 자산 성과 히트맵 월간 리포트.
+
+    포함 섹션:
+      1. 국면별 × 자산별 평균 월간 수익률 히트맵
+      2. 현재 국면 강조 테이블
+
+    Returns: 저장 경로(str)
+    """
+    monthly_dir = REPORTS_DIR / "monthly"
+    monthly_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = month_end or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else monthly_dir / f"m5_regime_perf_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+    current_regime = None
+
+    # 국면 분류
+    pmi_col = next((c for c in master.columns if "pmi" in c), None)
+    cpi_col = next((c for c in master.columns if "cpi" in c), None)
+
+    try:
+        if pmi_col and cpi_col:
+            from analysis.regime import classify_regime, regime_summary
+            regime_s = classify_regime(master[pmi_col], master[cpi_col]).dropna()
+            current_regime = regime_s.iloc[-1] if not regime_s.empty else None
+
+            # 월간 리샘플 후 국면별 자산 성과 계산
+            close_cols = [c for c in _PRIORITY_CLOSE_COLS if c in master.columns]
+            if close_cols and not regime_s.empty:
+                price_df = master[close_cols].copy()
+                # 월간 수익률
+                monthly_ret = price_df.resample("ME").last().pct_change(fill_method=None)
+                # 국면 (월 말 기준)
+                regime_monthly = regime_s.resample("ME").last()
+
+                combined = pd.concat([monthly_ret, regime_monthly.rename("regime")], axis=1).dropna(subset=["regime"])
+
+                regime_perf: dict[str, dict] = {}
+                for regime in ["reflation", "overheat", "stagflation", "deflation"]:
+                    mask = combined["regime"] == regime
+                    sub = combined.loc[mask, close_cols]
+                    if sub.empty:
+                        continue
+                    regime_perf[regime] = sub.mean().to_dict()
+
+                if regime_perf:
+                    perf_df = pd.DataFrame(regime_perf).T
+                    # 컬럼 이름 정리
+                    perf_df.columns = [c.replace("_close", "").replace("_", " ").upper() for c in perf_df.columns]
+
+                    # 히트맵
+                    z_vals = perf_df.values * 100  # 퍼센트 단위
+                    fig_hm = go.Figure(go.Heatmap(
+                        z=z_vals,
+                        x=list(perf_df.columns),
+                        y=list(perf_df.index),
+                        colorscale="RdYlGn",
+                        zmid=0,
+                        text=[[f"{v:.1f}%" for v in row] for row in z_vals],
+                        texttemplate="%{text}",
+                        hovertemplate="국면: %{y}<br>자산: %{x}<br>평균 월간수익률: %{text}<extra></extra>",
+                    ))
+                    # 현재 국면 강조 표시
+                    if current_regime and current_regime in perf_df.index:
+                        idx = list(perf_df.index).index(current_regime)
+                        fig_hm.add_shape(
+                            type="rect",
+                            x0=-0.5, x1=len(perf_df.columns) - 0.5,
+                            y0=idx - 0.5, y1=idx + 0.5,
+                            line=dict(color="#2c3e50", width=3),
+                        )
+                    fig_hm.update_layout(
+                        title="국면별 자산 평균 월간 수익률 (%)",
+                        height=300,
+                        margin=dict(l=100),
+                    )
+                    sections.append(_SECTION_TEMPLATE.format(
+                        heading="국면별 자산 성과 히트맵",
+                        chart_html=_fig_to_html(fig_hm),
+                    ))
+
+            # 현재 국면 카드
+            if current_regime:
+                regime_color = _REGIME_COLORS.get(current_regime, "#95a5a6")
+                recommended = ", ".join(_REGIME_ASSETS_KO.get(current_regime, []))
+                card = (
+                    f"<div style='padding:16px 24px;background:{regime_color}22;"
+                    f"border-left:6px solid {regime_color};border-radius:4px'>"
+                    f"<div style='font-size:1.3em;font-weight:bold;color:{regime_color}'>"
+                    f"현재 국면: {current_regime}</div>"
+                    f"<div style='margin-top:8px;color:#555'>역사적 성과 기준 권장 자산: {recommended}</div>"
+                    "</div>"
+                )
+                sections.append(_SECTION_TEMPLATE.format(heading="현재 국면 성과 요약", chart_html=card))
+
+    except Exception as e:
+        log.warning("build_m5_report: 국면 성과 계산 실패: %s", e)
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="데이터 부족",
+            chart_html=f"<p>국면 성과 계산에 필요한 데이터가 부족합니다: {e}</p>",
+        ))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"국면별 자산 성과 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_m5_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_m6_report  (M-6 공포-탐욕 지수)
+# ---------------------------------------------------------------------------
+
+def build_m6_report(
+    master: pd.DataFrame,
+    month_end: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    M-6 공포-탐욕 지수 분석 월간 리포트.
+
+    포함 섹션:
+      1. 공포-탐욕 지수 게이지 (현재값)
+      2. 공포-탐욕 지수 시계열 라인 차트 (최근 12개월)
+      3. 구성 지표 기여도 바 차트
+
+    Returns: 저장 경로(str)
+    """
+    monthly_dir = REPORTS_DIR / "monthly"
+    monthly_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = month_end or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else monthly_dir / f"m6_fear_greed_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+
+    try:
+        from analysis.fear_greed import fear_greed_summary, fear_greed_label
+
+        fg_summary = fear_greed_summary(master)
+        if not fg_summary:
+            raise ValueError("fear_greed_summary 반환값 없음")
+
+        fg_index = fg_summary["index"]
+        fg_label = fg_summary["label"]
+        fg_series = fg_summary["series"]
+        fg_components = fg_summary["components"]
+
+        # ── 1. 공포-탐욕 게이지 ─────────────────────────────────────────────
+        fig_gauge = plot_gauge(
+            fg_index,
+            title=f"공포-탐욕 지수: {fg_index} ({fg_label})",
+            low_label="극공포",
+            high_label="극탐욕",
+        )
+        sections.append(_SECTION_TEMPLATE.format(
+            heading=f"현재 공포-탐욕 지수: {fg_index} — {fg_label}",
+            chart_html=_fig_to_html(fig_gauge),
+        ))
+
+        # ── 2. 시계열 라인 차트 ──────────────────────────────────────────────
+        if not fg_series.empty:
+            cutoff = pd.Timestamp(ref_date) - pd.DateOffset(months=12)
+            fg_recent = fg_series[fg_series.index >= cutoff].dropna()
+            if not fg_recent.empty:
+                # 구간별 색상 배경
+                fig_ts = go.Figure()
+
+                # 배경 구간
+                zones = [
+                    (0,  20, "rgba(231,76,60,0.1)",   "극공포"),
+                    (20, 40, "rgba(231,76,60,0.06)",  "공포"),
+                    (40, 60, "rgba(243,156,18,0.08)", "중립"),
+                    (60, 80, "rgba(46,204,113,0.06)", "탐욕"),
+                    (80, 100,"rgba(46,204,113,0.1)",  "극탐욕"),
+                ]
+                for y0, y1, color, zone_label in zones:
+                    fig_ts.add_hrect(y0=y0, y1=y1, fillcolor=color, line_width=0,
+                                     annotation_text=zone_label, annotation_position="right")
+
+                fig_ts.add_trace(go.Scatter(
+                    x=fg_recent.index, y=fg_recent.values,
+                    mode="lines", name="공포-탐욕 지수",
+                    line=dict(color="#2c3e50", width=2),
+                ))
+                fig_ts.add_hline(y=50, line_dash="dot", line_color="#95a5a6")
+                fig_ts.update_layout(
+                    title="공포-탐욕 지수 추이 (최근 12개월)",
+                    yaxis=dict(title="지수 (0~100)", range=[0, 100]),
+                    hovermode="x",
+                )
+                sections.append(_SECTION_TEMPLATE.format(
+                    heading="공포-탐욕 지수 추이",
+                    chart_html=_fig_to_html(fig_ts),
+                ))
+
+        # ── 3. 구성 지표 기여도 바 차트 ────────────────────────────────────
+        if fg_components:
+            labels = list(fg_components.keys())
+            values = list(fg_components.values())
+            colors = ["#2ecc71" if v > 0 else "#e74c3c" for v in values]
+
+            fig_comp = go.Figure(go.Bar(
+                x=labels, y=values,
+                marker_color=colors,
+                text=[f"{v:+.3f}" for v in values],
+                textposition="outside",
+            ))
+            fig_comp.add_hline(y=0, line_color="#95a5a6")
+            fig_comp.update_layout(
+                title="구성 지표 기여도 (방향 보정 Z-Score)",
+                yaxis_title="기여 강도",
+                showlegend=False,
+            )
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="지표별 기여도",
+                chart_html=_fig_to_html(fig_comp),
+            ))
+
+    except Exception as e:
+        log.warning("build_m6_report: 공포-탐욕 계산 실패: %s", e)
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="데이터 부족",
+            chart_html=f"<p>공포-탐욕 지수 계산에 필요한 데이터가 부족합니다: {e}</p>",
+        ))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"공포-탐욕 지수 분석 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_m6_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_d6_report  (D-6 암호화폐 고래·기관 일간 스냅샷)
+# ---------------------------------------------------------------------------
+
+def build_d6_report(
+    master: pd.DataFrame,
+    date: str | None = None,
+    btc_companies_df=None,
+    output_path: str | None = None,
+) -> str:
+    """
+    D-6 암호화폐 고래·기관 일간 스냅샷 HTML 리포트.
+
+    포함 섹션:
+      1. 고래 온체인 신호 카드 (거래소 유입/유출 현황)
+      2. 거래소 유입/유출 7일 라인 차트
+      3. 대형 트랜잭션 알림 테이블 (당일)
+      4. 비트코인 현물 ETF 성과 테이블
+
+    Args:
+        master          : build_master_dataset() 반환값
+        date            : 기준일, None이면 마지막 유효일
+        btc_companies_df: CoinGecko 공개기업 BTC 보유량 (선택)
+        output_path     : None이면 reports/daily/d6_crypto_intel_{date}.html
+
+    Returns: 저장 경로(str)
+    """
+    daily_dir = REPORTS_DIR / "daily"
+    daily_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = date or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else daily_dir / f"d6_crypto_intel_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+
+    try:
+        from analysis.crypto_intel import crypto_intel_summary, whale_flow_summary, etf_flow_summary
+
+        intel = crypto_intel_summary(master, btc_companies_df)
+        whale_s = intel.get("whale", {})
+        etf_s   = intel.get("etf", {})
+        overall_signal = intel.get("overall_signal", 0)
+        overall_label  = intel.get("overall_label", "중립")
+
+        # ── 1. 종합 신호 카드 ──────────────────────────────────────────────
+        if overall_signal == 1:
+            sig_color = "#2ecc71"
+        elif overall_signal == -1:
+            sig_color = "#e74c3c"
+        else:
+            sig_color = "#f39c12"
+
+        # 고래 유입/유출 비율
+        io_ratio = whale_s.get("inflow_outflow_ratio")
+        io_str   = f"{io_ratio:.2f}" if io_ratio is not None else "—"
+        net7d    = whale_s.get("net_flow_7d", 0)
+        net7d_str = f"{net7d:+,.0f} BTC" if net7d else "—"
+        alert_cnt = whale_s.get("alert_count_7d", 0)
+
+        signal_card = (
+            f"<div style='display:flex;gap:12px;flex-wrap:wrap'>"
+            # 종합 신호
+            f"<div style='flex:1;min-width:140px;text-align:center;padding:16px;"
+            f"background:{sig_color}22;border:2px solid {sig_color};border-radius:8px'>"
+            f"<div style='font-size:1.4em;font-weight:bold;color:{sig_color}'>{overall_label}</div>"
+            f"<div style='color:#555;margin-top:6px;font-size:0.9em'>고래·ETF·기관 종합</div>"
+            f"</div>"
+            # 7일 순유량
+            f"<div style='flex:1;min-width:140px;text-align:center;padding:16px;"
+            f"background:#ecf0f1;border-radius:8px'>"
+            f"<div style='font-size:1.3em;font-weight:bold;color:#2c3e50'>{net7d_str}</div>"
+            f"<div style='color:#555;margin-top:6px;font-size:0.9em'>거래소 7일 순유출(BTC)</div>"
+            f"</div>"
+            # 대형 이동 건수
+            f"<div style='flex:1;min-width:140px;text-align:center;padding:16px;"
+            f"background:#ecf0f1;border-radius:8px'>"
+            f"<div style='font-size:1.3em;font-weight:bold;color:#8e44ad'>{alert_cnt}건</div>"
+            f"<div style='color:#555;margin-top:6px;font-size:0.9em'>7일 대형 이동 (≥100만USD)</div>"
+            f"</div>"
+            # 유입/유출 비율
+            f"<div style='flex:1;min-width:140px;text-align:center;padding:16px;"
+            f"background:#ecf0f1;border-radius:8px'>"
+            f"<div style='font-size:1.3em;font-weight:bold;color:#2980b9'>{io_str}</div>"
+            f"<div style='color:#555;margin-top:6px;font-size:0.9em'>30일 유출/유입 비율</div>"
+            f"</div>"
+            f"</div>"
+        )
+        sections.append(_SECTION_TEMPLATE.format(heading="고래·기관 종합 신호", chart_html=signal_card))
+
+    except Exception as e:
+        log.warning("build_d6_report: 신호 계산 실패: %s", e)
+
+    # ── 2. 거래소 유입/유출 7일 라인 차트 ──────────────────────────────────
+    flow_cols = {
+        "whale_btc_exchange_inflow":  ("거래소 유입 (BTC)", "#e74c3c"),
+        "whale_btc_exchange_outflow": ("거래소 유출 (BTC)", "#2ecc71"),
+        "whale_btc_exchange_net":     ("순유출 (BTC)", "#3498db"),
+    }
+    available_flow = {k: v for k, v in flow_cols.items() if k in master.columns}
+
+    if available_flow:
+        cutoff = pd.Timestamp(ref_date) - pd.Timedelta(days=60)
+        df_flow = master[[c for c in available_flow]].loc[master.index >= cutoff].dropna(how="all")
+        if not df_flow.empty:
+            fig_flow = go.Figure()
+            for col, (label, color) in available_flow.items():
+                if col in df_flow.columns:
+                    s = df_flow[col].dropna()
+                    if not s.empty:
+                        fig_flow.add_trace(go.Scatter(
+                            x=s.index, y=s.values, mode="lines",
+                            name=label, line=dict(color=color, width=2),
+                        ))
+            fig_flow.add_hline(y=0, line_dash="dot", line_color="#bdc3c7")
+            fig_flow.update_layout(
+                title="거래소 BTC 유입/유출 추이 (최근 60일)",
+                yaxis_title="BTC",
+                hovermode="x unified",
+            )
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="거래소 온체인 자금 흐름",
+                chart_html=_fig_to_html(fig_flow),
+            ))
+
+    # ── 3. 대형 트랜잭션 알림 테이블 ───────────────────────────────────────
+    alert_vol_col = "whale_alert_volume_usd"
+    alert_cnt_col = "whale_alert_count"
+    if alert_cnt_col in master.columns or alert_vol_col in master.columns:
+        cutoff14 = pd.Timestamp(ref_date) - pd.Timedelta(days=14)
+        alert_cols = [c for c in [alert_cnt_col, alert_vol_col,
+                                   "whale_exchange_inflow_count", "whale_exchange_outflow_count"]
+                      if c in master.columns]
+        df_alert = master[alert_cols].loc[master.index >= cutoff14].dropna(how="all")
+        if not df_alert.empty:
+            tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+                   "<tr style='background:#ecf0f1'>"
+                   "<th style='padding:6px 12px;text-align:left'>날짜</th>"
+                   "<th style='padding:6px 12px;text-align:right'>대형 이동 건수</th>"
+                   "<th style='padding:6px 12px;text-align:right'>총액 (백만 USD)</th>"
+                   "<th style='padding:6px 12px;text-align:right'>거래소 유입</th>"
+                   "<th style='padding:6px 12px;text-align:right'>거래소 유출</th>"
+                   "</tr>")
+            for i, (dt, row) in enumerate(df_alert.tail(14).iterrows()):
+                bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+                dt_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)
+                cnt     = int(row.get(alert_cnt_col, 0)) if alert_cnt_col in row.index else "—"
+                vol     = f"{row.get(alert_vol_col, 0):.1f}" if alert_vol_col in row.index else "—"
+                inf_cnt = int(row.get("whale_exchange_inflow_count", 0)) if "whale_exchange_inflow_count" in row.index else "—"
+                out_cnt = int(row.get("whale_exchange_outflow_count", 0)) if "whale_exchange_outflow_count" in row.index else "—"
+                tbl += (f"<tr style='background:{bg}'>"
+                        f"<td style='padding:6px 12px'>{dt_str}</td>"
+                        f"<td style='padding:6px 12px;text-align:right'>{cnt}</td>"
+                        f"<td style='padding:6px 12px;text-align:right'>{vol}</td>"
+                        f"<td style='padding:6px 12px;text-align:right;color:#e74c3c'>{inf_cnt}</td>"
+                        f"<td style='padding:6px 12px;text-align:right;color:#2ecc71'>{out_cnt}</td>"
+                        "</tr>")
+            tbl += "</table>"
+            sections.append(_SECTION_TEMPLATE.format(heading="최근 14일 대형 트랜잭션 현황", chart_html=tbl))
+
+    # ── 4. ETF 성과 테이블 ──────────────────────────────────────────────────
+    try:
+        from analysis.crypto_intel import etf_flow_summary
+        etf_s = etf_flow_summary(master)
+        etf_perf = etf_s.get("etf_performance", {})
+        if etf_perf:
+            tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+                   "<tr style='background:#ecf0f1'>"
+                   "<th style='padding:6px 12px;text-align:left'>ETF</th>"
+                   "<th style='padding:6px 12px;text-align:right'>현재가 (USD)</th>"
+                   "<th style='padding:6px 12px;text-align:right'>30일 변화</th>"
+                   "</tr>")
+            for i, (ticker, info) in enumerate(sorted(etf_perf.items())):
+                bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+                chg = info.get("change_pct", 0)
+                color = "#2ecc71" if chg > 0 else "#e74c3c"
+                chg_str = f"{chg:+.2f}%" if chg is not None else "—"
+                tbl += (f"<tr style='background:{bg}'>"
+                        f"<td style='padding:6px 12px;font-weight:bold'>{ticker}</td>"
+                        f"<td style='padding:6px 12px;text-align:right'>${info.get('current', 0):,.2f}</td>"
+                        f"<td style='padding:6px 12px;text-align:right;color:{color}'>{chg_str}</td>"
+                        "</tr>")
+            tbl += "</table>"
+            avg_chg = etf_s.get("total_etf_aum_change_pct")
+            if avg_chg is not None:
+                tbl += f"<p style='color:#666;font-size:0.85em'>30일 평균 변화: {avg_chg:+.2f}%</p>"
+            sections.append(_SECTION_TEMPLATE.format(heading="비트코인 현물 ETF 현황", chart_html=tbl))
+    except Exception as e:
+        log.warning("build_d6_report: ETF 테이블 실패: %s", e)
+
+    html = _HTML_TEMPLATE.format(
+        title=f"암호화폐 고래·기관 스냅샷 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_d6_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_w6_report  (W-6 기관 포트폴리오 변화 주간)
+# ---------------------------------------------------------------------------
+
+def build_w6_report(
+    master: pd.DataFrame,
+    week_end: str | None = None,
+    btc_companies_df=None,
+    sec_13f_df=None,
+    output_path: str | None = None,
+) -> str:
+    """
+    W-6 기관 포트폴리오 변화 주간 리포트.
+
+    포함 섹션:
+      1. 공개기업 BTC 보유량 상위 15개사 바 차트
+      2. ETF 운용사별 가격 추이 라인 차트 (12주)
+      3. 13F 분기 공시 암호화폐 포지션 테이블
+
+    Args:
+        master          : build_master_dataset() 반환값
+        week_end        : 주 기준일
+        btc_companies_df: CoinGecko 공개기업 BTC 보유량
+        sec_13f_df      : SEC 13F 분기 데이터
+        output_path     : None이면 reports/weekly/w6_institution_{date}.html
+
+    Returns: 저장 경로(str)
+    """
+    weekly_dir = REPORTS_DIR / "weekly"
+    weekly_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = week_end or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else weekly_dir / f"w6_institution_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+
+    # ── 1. 공개기업 BTC 보유량 바 차트 ────────────────────────────────────
+    if btc_companies_df is not None and not btc_companies_df.empty:
+        top15 = btc_companies_df.head(15)
+        companies = list(top15.index)
+        holdings  = list(top15["total_holdings"].values)
+        values_usd = list(top15["total_current_value_usd"].values)
+
+        fig_bar = go.Figure()
+        fig_bar.add_trace(go.Bar(
+            x=companies,
+            y=holdings,
+            marker_color="#f39c12",
+            text=[f"{h:,.0f}" for h in holdings],
+            textposition="outside",
+            name="BTC 보유량",
+            customdata=values_usd,
+            hovertemplate="%{x}<br>보유량: %{y:,.0f} BTC<br>현재가치: $%{customdata:,.0f}<extra></extra>",
+        ))
+        fig_bar.update_layout(
+            title="공개기업 BTC 보유량 상위 15개사",
+            yaxis_title="BTC",
+            xaxis_tickangle=-30,
+            height=450,
+        )
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="공개기업 BTC 보유 현황 (CoinGecko)",
+            chart_html=_fig_to_html(fig_bar),
+        ))
+
+        # 요약 카드
+        try:
+            from analysis.crypto_intel import institution_accumulation_signal
+            inst_s = institution_accumulation_signal(btc_companies_df)
+            total_btc = inst_s.get("total_btc", 0)
+            total_usd = inst_s.get("total_value_usd", 0)
+            summary_card = (
+                f"<div style='display:flex;gap:12px;flex-wrap:wrap;margin-top:12px'>"
+                f"<div style='flex:1;min-width:160px;text-align:center;padding:14px;"
+                f"background:#f39c1222;border:2px solid #f39c12;border-radius:8px'>"
+                f"<div style='font-size:1.5em;font-weight:bold;color:#f39c12'>{total_btc:,.0f} BTC</div>"
+                f"<div style='color:#555;margin-top:4px'>공개기업 총 보유량</div>"
+                f"</div>"
+                f"<div style='flex:1;min-width:160px;text-align:center;padding:14px;"
+                f"background:#ecf0f1;border-radius:8px'>"
+                f"<div style='font-size:1.5em;font-weight:bold;color:#2c3e50'>${total_usd/1e9:.1f}B</div>"
+                f"<div style='color:#555;margin-top:4px'>현재 총 가치 (USD)</div>"
+                f"</div>"
+                f"<div style='flex:1;min-width:160px;text-align:center;padding:14px;"
+                f"background:#ecf0f1;border-radius:8px'>"
+                f"<div style='font-size:1.5em;font-weight:bold;color:#2c3e50'>{len(btc_companies_df)}개사</div>"
+                f"<div style='color:#555;margin-top:4px'>보유 기업 수</div>"
+                f"</div>"
+                f"</div>"
+            )
+            sections.append(_SECTION_TEMPLATE.format(heading="기관 보유 요약", chart_html=summary_card))
+        except Exception as e:
+            log.warning("build_w6_report: 기관 요약 실패: %s", e)
+
+    else:
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="공개기업 BTC 보유 현황",
+            chart_html="<p>CoinGecko 기업 데이터를 먼저 수집해주세요 (get_public_company_holdings).</p>",
+        ))
+
+    # ── 2. ETF 가격 추이 라인 차트 (12주) ─────────────────────────────────
+    etf_close_cols = [c for c in master.columns if c.startswith("etf_") and c.endswith("_close")]
+    if etf_close_cols:
+        cutoff = pd.Timestamp(ref_date) - pd.Timedelta(weeks=12)
+        df_etf = master[etf_close_cols].loc[master.index >= cutoff].dropna(how="all")
+        if not df_etf.empty:
+            fig_etf = go.Figure()
+            colors = ["#3498db", "#e74c3c", "#2ecc71", "#f39c12",
+                      "#9b59b6", "#1abc9c", "#e67e22", "#95a5a6"]
+            for i, col in enumerate(etf_close_cols):
+                ticker = col.replace("etf_", "").replace("_close", "").upper()
+                s = df_etf[col].dropna()
+                if s.empty:
+                    continue
+                # 정규화 (시작=100 기준)
+                s_norm = s / s.iloc[0] * 100
+                fig_etf.add_trace(go.Scatter(
+                    x=s_norm.index, y=s_norm.values,
+                    mode="lines", name=ticker,
+                    line=dict(color=colors[i % len(colors)], width=2),
+                ))
+            fig_etf.add_hline(y=100, line_dash="dot", line_color="#bdc3c7",
+                               annotation_text="기준 (100)")
+            fig_etf.update_layout(
+                title="비트코인 ETF 가격 추이 (12주, 시작=100 정규화)",
+                yaxis_title="정규화 지수 (시작=100)",
+                hovermode="x unified",
+            )
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="비트코인 현물 ETF 상대 성과",
+                chart_html=_fig_to_html(fig_etf),
+            ))
+
+    # ── 3. SEC 13F 테이블 ──────────────────────────────────────────────────
+    if sec_13f_df is not None and not sec_13f_df.empty:
+        tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+               "<tr style='background:#ecf0f1'>"
+               "<th style='padding:6px 12px;text-align:left'>기관</th>"
+               "<th style='padding:6px 12px;text-align:left'>증권</th>"
+               "<th style='padding:6px 12px;text-align:right'>보유 수량</th>"
+               "<th style='padding:6px 12px;text-align:right'>가치 (USD)</th>"
+               "<th style='padding:6px 12px;text-align:right'>분기</th>"
+               "</tr>")
+        for i, row in sec_13f_df.iterrows():
+            bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+            tbl += (f"<tr style='background:{bg}'>"
+                    f"<td style='padding:6px 12px;font-weight:bold'>{row.get('institution', '')}</td>"
+                    f"<td style='padding:6px 12px'>{row.get('security_name', '')}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>{row.get('shares', 0):,}</td>"
+                    f"<td style='padding:6px 12px;text-align:right'>${row.get('value_usd', 0):,.0f}</td>"
+                    f"<td style='padding:6px 12px;text-align:right;color:#999'>{row.get('quarter', '')}</td>"
+                    "</tr>")
+        tbl += "</table>"
+        sections.append(_SECTION_TEMPLATE.format(heading="SEC 13F 암호화폐 포지션", chart_html=tbl))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"기관 암호화폐 포트폴리오 — {ref_date}",
+        generated_at=ref_date, date_range=ref_date,
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_w6_report: saved to %s", out)
+    return str(out.resolve())
