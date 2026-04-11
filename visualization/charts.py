@@ -20,6 +20,21 @@ log = get_logger("visualization.charts")
 # 컬럼 suffix 패턴: _close, _open, _high, _low, _volume, _adj_close 등
 _SUFFIX_RE = re.compile(r"_(close|open|high|low|volume|adj_close)$", re.IGNORECASE)
 
+# D-1 일간 시황에 사용할 기본 컬럼 (우선순위 순)
+_DAILY_COLS = [
+    "us_sp500_close", "us_nasdaq_close", "kr_kospi_close",
+    "cmd_wti_close", "cmd_gold_close", "fx_krw_usd_close",
+    "crypto_btc_close", "crypto_eth_close",
+]
+
+# 국면별 색상
+_REGIME_COLORS: dict[str, str] = {
+    "reflation":   "#2ecc71",  # 초록 — 성장 회복
+    "overheat":    "#e67e22",  # 주황 — 과열
+    "stagflation": "#e74c3c",  # 빨강 — 스태그플레이션
+    "deflation":   "#3498db",  # 파랑 — 디플레이션
+}
+
 
 def _clean_label(col: str) -> str:
     """컬럼명에서 OHLCV suffix를 제거해 레이블을 정리한다."""
@@ -207,6 +222,175 @@ def plot_rolling_correlation(
         xaxis_title="Date",
         yaxis=dict(title="Spearman ρ", range=[-1.05, 1.05]),
         hovermode="x unified",
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# plot_daily_returns
+# ---------------------------------------------------------------------------
+
+def plot_daily_returns(
+    master: pd.DataFrame,
+    date: str | None = None,
+    cols: list[str] | None = None,
+) -> go.Figure:
+    """
+    지정 날짜의 전일 대비 등락률 수평 바 차트 (D-1 일간 시황용).
+
+    Args:
+        master: DatetimeIndex DataFrame
+        date  : 'YYYY-MM-DD', None이면 마지막 유효일
+        cols  : 대상 컬럼 리스트, None이면 _DAILY_COLS 기본값
+    Returns:
+        go.Figure — 수평 막대 차트, 양수=초록, 음수=빨강
+    """
+    if master.empty:
+        log.warning("plot_daily_returns: 빈 DataFrame")
+        return go.Figure()
+
+    target_cols = [c for c in (cols or _DAILY_COLS) if c in master.columns]
+    if not target_cols:
+        log.warning("plot_daily_returns: 대상 컬럼 없음")
+        return go.Figure()
+
+    df = master[target_cols].dropna(how="all")
+    if df.empty:
+        return go.Figure()
+
+    # 기준일 결정
+    if date is not None:
+        ts = pd.Timestamp(date)
+        available = df.index[df.index <= ts]
+        if available.empty:
+            log.warning("plot_daily_returns: %s 이전 데이터 없음", date)
+            return go.Figure()
+        ref_date = available[-1]
+    else:
+        ref_date = df.index[-1]
+
+    # 전일 찾기
+    prev_dates = df.index[df.index < ref_date]
+    if prev_dates.empty:
+        log.warning("plot_daily_returns: 전일 데이터 없음 (ref=%s)", ref_date.date())
+        return go.Figure()
+    prev_date = prev_dates[-1]
+
+    curr = df.loc[ref_date]
+    prev = df.loc[prev_date]
+    rets = ((curr - prev) / prev.abs()).dropna() * 100  # %
+
+    if rets.empty:
+        return go.Figure()
+
+    labels = [_clean_label(c) for c in rets.index]
+    colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in rets.values]
+    text = [f"{v:+.2f}%" for v in rets.values]
+
+    fig = go.Figure(go.Bar(
+        x=rets.values,
+        y=labels,
+        orientation="h",
+        marker_color=colors,
+        text=text,
+        textposition="outside",
+        hovertemplate="%{y}: %{text}<extra></extra>",
+    ))
+
+    fig.update_layout(
+        title=f"자산별 등락률 — {ref_date.date()} (전일 대비)",
+        xaxis=dict(title="%", zeroline=True, zerolinecolor="#bdc3c7", zerolinewidth=1),
+        yaxis=dict(autorange="reversed"),
+        margin=dict(l=120, r=80, t=60, b=40),
+        height=max(300, len(labels) * 40),
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# plot_regime_timeline
+# ---------------------------------------------------------------------------
+
+def plot_regime_timeline(
+    regime_series: pd.Series,
+    title: str = "매크로 국면 타임라인",
+) -> go.Figure:
+    """
+    국면 히스토리를 구간별 컬러 바로 표시 (W-2, M-1 국면 섹션용).
+
+    Args:
+        regime_series: classify_regime() 반환값 (DatetimeIndex, 국면명 문자열)
+        title        : 차트 제목
+    Returns:
+        go.Figure — 국면별 색상 구간 바 + 범례
+    """
+    valid = regime_series.dropna()
+    if valid.empty:
+        log.warning("plot_regime_timeline: 유효한 국면 데이터 없음")
+        return go.Figure()
+
+    # 연속 구간 계산
+    segments: list[dict] = []
+    prev_regime = None
+    seg_start = None
+
+    for ts, regime in valid.items():
+        if regime != prev_regime:
+            if prev_regime is not None:
+                segments.append({"regime": prev_regime, "start": seg_start, "end": ts})
+            prev_regime = regime
+            seg_start = ts
+    if prev_regime is not None:
+        segments.append({"regime": prev_regime, "start": seg_start, "end": valid.index[-1]})
+
+    fig = go.Figure()
+
+    # 이미 추가된 범례 항목 추적 (중복 방지)
+    shown_legends: set[str] = set()
+
+    for seg in segments:
+        regime = seg["regime"]
+        color = _REGIME_COLORS.get(regime, "#95a5a6")
+        show_legend = regime not in shown_legends
+        shown_legends.add(regime)
+
+        fig.add_trace(go.Scatter(
+            x=[seg["start"], seg["end"], seg["end"], seg["start"], seg["start"]],
+            y=[0, 0, 1, 1, 0],
+            fill="toself",
+            fillcolor=color,
+            line=dict(width=0),
+            mode="lines",
+            name=regime,
+            legendgroup=regime,
+            showlegend=show_legend,
+            opacity=0.7,
+            hovertemplate=(
+                f"<b>{regime}</b><br>"
+                f"{seg['start'].strftime('%Y-%m-%d')} ~ {seg['end'].strftime('%Y-%m-%d')}"
+                "<extra></extra>"
+            ),
+        ))
+
+    # 현재 국면 텍스트 주석
+    current_regime = valid.iloc[-1]
+    current_color = _REGIME_COLORS.get(current_regime, "#95a5a6")
+    fig.add_annotation(
+        x=valid.index[-1], y=1.15,
+        text=f"현재: <b>{current_regime}</b>",
+        showarrow=False,
+        font=dict(size=13, color=current_color),
+        xanchor="right",
+    )
+
+    fig.update_layout(
+        title=title,
+        xaxis=dict(title="날짜"),
+        yaxis=dict(visible=False, range=[-0.2, 1.4]),
+        hovermode="x",
+        legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="left", x=0),
+        margin=dict(l=40, r=40, t=80, b=40),
+        height=200,
     )
     return fig
 

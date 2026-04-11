@@ -16,6 +16,12 @@ def parse_args():
     parser.add_argument("--start", default=DEFAULT_START)
     parser.add_argument("--end", default=str(date.today()))
     parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument(
+        "--mode",
+        choices=["daily", "weekly", "monthly", "all"],
+        default="all",
+        help="생성할 리포트 종류 (daily/weekly/monthly/all)",
+    )
     return parser.parse_args()
 
 
@@ -96,7 +102,7 @@ def main():
         log.error("No data collected — check API keys and network.")
         return
 
-    # ── 5. 병합 ─────────────────────────────────────────────────────────────
+    # ── 7. 병합 ─────────────────────────────────────────────────────────────
     try:
         from processors.merger import merge_dataframes
         master = merge_dataframes(frames)
@@ -105,14 +111,39 @@ def main():
         log.error("merge failed: %s", e)
         return
 
-    # ── 6. 리포트 생성 ───────────────────────────────────────────────────────
-    try:
-        from visualization.report import build_report
-        path = build_report(master)
-        log.info("Report saved: %s", path)
-        print(f"\nReport: {path}")
-    except Exception as e:
-        log.error("report generation failed: %s", e)
+    # ── 8. 리포트 생성 ───────────────────────────────────────────────────────
+    mode = args.mode
+    generated: list[str] = []
+
+    if mode in ("daily", "all"):
+        try:
+            from visualization.report import build_daily_report
+            path = build_daily_report(master)
+            log.info("일간 리포트: %s", path)
+            generated.append(path)
+        except Exception as e:
+            log.error("daily report failed: %s", e)
+
+    if mode in ("weekly", "all"):
+        try:
+            from visualization.report import build_weekly_report
+            path = build_weekly_report(master)
+            log.info("주간 리포트: %s", path)
+            generated.append(path)
+        except Exception as e:
+            log.error("weekly report failed: %s", e)
+
+    if mode in ("monthly", "all"):
+        try:
+            from visualization.report import build_report
+            path = build_report(master)
+            log.info("월간 리포트: %s", path)
+            generated.append(path)
+        except Exception as e:
+            log.error("monthly report failed: %s", e)
+
+    for p in generated:
+        print(f"Report: {p}")
 
 
 if __name__ == "__main__":
