@@ -4,13 +4,14 @@ collectors/global_/whale.py
 암호화폐 고래(대형 거래) 온체인 데이터 수집.
 
 데이터 소스:
-  1. Whale Alert API  — 대형 트랜잭션 (≥100만 USD) 알림
-  2. Glassnode API    — 거래소 BTC 순유입/유출 (무료 티어: 일별)
-  3. CoinGecko        — 거래소별 BTC 보유량 (기존 demo key)
+  1. Whale Alert API   — 대형 트랜잭션 (≥100만 USD) 알림
+  2. CryptoQuant API   — 거래소 BTC 순유입/유출 (무료 플랜)
+  3. CoinGecko         — 거래소별 BTC 거래량 (기존 demo key)
 
 출력 컬럼 (master 병합용):
   whale_btc_exchange_inflow   : 거래소 BTC 순유입 (BTC)
   whale_btc_exchange_outflow  : 거래소 BTC 순유출 (BTC)
+  whale_btc_exchange_net      : 순유출 - 순유입 (BTC, 양수=유출 우세)
   whale_alert_count           : 당일 ≥min_usd 이동 건수
   whale_alert_volume_usd      : 당일 총 이동 금액 (백만 USD)
 """
@@ -34,8 +35,8 @@ CACHE_DIR = BASE_DIR / "data" / "cache" / "whale"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # API endpoints
-_WHALE_ALERT_BASE = "https://api.whale-alert.io/v1"
-_GLASSNODE_BASE   = "https://api.glassnode.com/v1/metrics"
+_WHALE_ALERT_BASE  = "https://api.whale-alert.io/v1"
+_CRYPTOQUANT_BASE  = "https://api.cryptoquant.com/v1"
 
 
 def _load_cache(key: str) -> dict | None:
@@ -217,16 +218,18 @@ def aggregate_whale_alerts(df: pd.DataFrame) -> pd.DataFrame:
 # Glassnode API (무료 티어: 일별 온체인 지표)
 # ---------------------------------------------------------------------------
 
-def get_glassnode_exchange_flow(
+def get_cryptoquant_exchange_flow(
     start: str,
     end: str | None = None,
     use_cache: bool = True,
 ) -> pd.DataFrame:
     """
-    Glassnode API로 BTC 거래소 순유입/유출을 수집한다.
+    CryptoQuant API로 BTC 거래소 순유입/유출을 수집한다.
 
-    GLASSNODE_API_KEY 환경변수가 없으면 빈 DataFrame 반환.
-    무료 티어: 일별 데이터, 온체인 거래소 유입/유출 지표.
+    CRYPTOQUANT_API_KEY 환경변수가 없으면 빈 DataFrame 반환.
+    무료 플랜: 일별 데이터, 전체 거래소 합산 유입/유출.
+
+    API 문서: https://cryptoquant.com/docs
 
     Args:
         start    : 시작일 'YYYY-MM-DD'
@@ -238,13 +241,13 @@ def get_glassnode_exchange_flow(
                    whale_btc_exchange_outflow, whale_btc_exchange_net)
     """
     import os
-    api_key = os.environ.get("GLASSNODE_API_KEY", "")
+    api_key = os.environ.get("CRYPTOQUANT_API_KEY", "")
     if not api_key:
-        log.warning("get_glassnode_exchange_flow: GLASSNODE_API_KEY 없음 — 스킵")
+        log.warning("get_cryptoquant_exchange_flow: CRYPTOQUANT_API_KEY 없음 — 스킵")
         return pd.DataFrame()
 
     end = end or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    ck = _cache_key("glassnode_flow", start, end)
+    ck = _cache_key("cryptoquant_flow", start, end)
 
     if use_cache:
         cached = _load_cache(ck)
@@ -255,59 +258,87 @@ def get_glassnode_exchange_flow(
                 df.index = pd.to_datetime(df.index)
             return df
 
-    start_ts = int(datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
-    end_ts   = int(datetime.strptime(end,   "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type":  "application/json",
+    }
 
-    metrics = [
-        ("transactions/transfers_volume_exchanges_net",  "whale_btc_exchange_net"),
-        ("transactions/transfers_volume_to_exchanges_sum",   "whale_btc_exchange_inflow"),
-        ("transactions/transfers_volume_from_exchanges_sum", "whale_btc_exchange_outflow"),
+    # CryptoQuant v1 엔드포인트: exchange-flows (전체 거래소 합산)
+    # window=day, exchange=all
+    endpoints = [
+        ("btc/exchange-flows/inflow",  "whale_btc_exchange_inflow",  "inflow_total"),
+        ("btc/exchange-flows/outflow", "whale_btc_exchange_outflow", "outflow_total"),
     ]
 
     frames: list[pd.Series] = []
-    for endpoint, col_name in metrics:
+    for endpoint, col_name, value_key in endpoints:
         params = {
-            "a":         "BTC",
-            "i":         "24h",
-            "s":         start_ts,
-            "u":         end_ts,
-            "api_key":   api_key,
+            "window":    "day",
+            "exchange":  "all",
+            "from":      start,
+            "to":        end,
+            "limit":     500,
         }
         try:
-            resp = requests.get(f"{_GLASSNODE_BASE}/{endpoint}", params=params, timeout=20)
+            resp = requests.get(
+                f"{_CRYPTOQUANT_BASE}/{endpoint}",
+                headers=headers,
+                params=params,
+                timeout=20,
+            )
             if resp.status_code == 401:
-                log.warning("Glassnode: 인증 실패 (401) — API 키 확인 필요")
+                log.warning("CryptoQuant: 인증 실패 (401) — API 키 확인 필요")
                 break
             if resp.status_code == 403:
-                log.warning("Glassnode: 무료 티어 접근 불가 (403) — %s", endpoint)
+                log.warning("CryptoQuant: 접근 권한 없음 (403) — 플랜 확인 필요")
+                break
+            if resp.status_code == 429:
+                log.warning("CryptoQuant: 요청 한도 초과 (429) — 잠시 후 재시도")
+                time.sleep(5)
                 continue
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            log.warning("Glassnode API 오류 [%s]: %s", endpoint, e)
+            log.warning("CryptoQuant API 오류 [%s]: %s", endpoint, e)
             continue
 
-        if not data:
+        items = data.get("result", {}).get("data", [])
+        if not items:
             continue
 
-        s = pd.Series(
-            {pd.Timestamp(item["t"], unit="s"): item.get("v") for item in data},
-            name=col_name,
-        )
-        s = s.dropna()
-        if not s.empty:
-            s.index = s.index.normalize()
-            frames.append(s)
+        series_data: dict = {}
+        for item in items:
+            # CryptoQuant 응답: {"date": "2024-01-01", "inflow_total": 12345.67, ...}
+            date_str = item.get("date") or item.get("datetime", "")
+            val = item.get(value_key) or item.get("value")
+            if date_str and val is not None:
+                try:
+                    series_data[pd.Timestamp(date_str)] = float(val)
+                except (ValueError, TypeError):
+                    continue
+
+        if not series_data:
+            continue
+
+        s = pd.Series(series_data, name=col_name)
+        s.index = pd.to_datetime(s.index).normalize()
+        frames.append(s)
         time.sleep(0.3)
 
     if not frames:
         return pd.DataFrame()
 
     result = pd.concat(frames, axis=1)
-    result.index.name = None
 
-    _save_cache(ck, result.reset_index().rename(columns={"index": "index"}).to_dict("list"))
-    log.info("get_glassnode_exchange_flow: %d행 수집 (%s ~ %s)", len(result), start, end)
+    # 순유출 = 유출 - 유입 (양수: 거래소 자금 순유출 → 강세 신호)
+    if "whale_btc_exchange_inflow" in result.columns and "whale_btc_exchange_outflow" in result.columns:
+        result["whale_btc_exchange_net"] = (
+            result["whale_btc_exchange_outflow"] - result["whale_btc_exchange_inflow"]
+        )
+
+    result.index.name = None
+    _save_cache(ck, result.reset_index().rename(columns={result.index.name or "index": "index"}).to_dict("list"))
+    log.info("get_cryptoquant_exchange_flow: %d행 수집 (%s ~ %s)", len(result), start, end)
     return result
 
 
@@ -398,10 +429,10 @@ def get_whale_dataset(
         if not agg.empty:
             frames.append(agg)
 
-    # Glassnode 거래소 유입/유출
-    df_gl = get_glassnode_exchange_flow(start, end, use_cache=use_cache)
-    if not df_gl.empty:
-        frames.append(df_gl)
+    # CryptoQuant 거래소 유입/유출
+    df_cq = get_cryptoquant_exchange_flow(start, end, use_cache=use_cache)
+    if not df_cq.empty:
+        frames.append(df_cq)
 
     if not frames:
         log.warning("get_whale_dataset: 수집된 고래 데이터 없음")
