@@ -121,3 +121,90 @@ def plot_*(data, title: str, **options) -> go.Figure
 - **분석**: scipy, statsmodels
 - **시각화**: plotly, matplotlib, seaborn
 - **환경**: venv (`.venv/`)
+
+---
+
+## 블로그 콘텐츠 기획 (확정 2026-04-12)
+
+> 각 파트 구현 전 세부 기획안(`PLAN_*.md`)을 먼저 생성하고 확인 후 진행한다.
+
+### 디렉토리 구조 추가 (예정)
+```
+analysis/
+├── prediction.py       # 미국→KOSPI 예측 모델 (신규)
+├── sentiment.py        # 감성 이동평균, 복합 감성 점수 (신규)
+└── fear_greed.py       # 공포-탐욕 지수 (신규)
+data/processed/
+└── prediction_log.parquet  # 예측 정확도 트래킹 로그
+```
+
+---
+
+### 일간 (Daily)
+
+| # | 제목 형식 | 사용 데이터 | 분석 방법 | 시각화 | 구현 복잡도 |
+|---|-----------|-------------|-----------|--------|------------|
+| D-1 | `[일간 시황] YYYY-MM-DD` | 글로벌 지수 8개, VIX, 금리, 원자재, 암호화폐 | 전일 대비 pct_change, VIX 레벨 분류 | 자산별 등락 수평 막대 + 숫자 카드 | 하 |
+| D-2 | `[연준·금리 감성] YYYY-MM-DD` | sent_news_fed, sent_news_global, rate 계열 | VADER 7일 이동평균, 장단기 스프레드 레벨 | 감성 게이지 + 금리 이중축 라인 | 하 |
+| D-3 | `[암호화폐 스냅샷] YYYY-MM-DD` | crypto_btc/eth_close, btc_dominance, total_mcap | 24h 변화율, 도미넌스 | 도미넌스 게이지 + 시총 면적 차트 | 하 |
+| D-4 | `[오늘 KOSPI 예상] YYYY-MM-DD` | us_sp500, rate_spread_10_2, rate_hy_spread, alt_vix, fx_krw_usd, sent_news_global → kr_kospi (lag=1) | 다수결 방향 신호 + 로지스틱 회귀 확률 | 신호등 UI + 확률 게이지 + 선행 상관 순위 막대 | 중 |
+| D-5 | `[미국→한국 시장 선행 분석] YYYY-MM-DD` | 미국 전일 종가 변수들 → KOSPI 갭 (open/close-1) | OLS 갭 예측(S&P500_ret + KRW_ret), 롤링 선행 상관 추이 | 산점도 + 회귀선 + 롤링 상관계수 라인 | 중 |
+
+### 주간 (Weekly)
+
+| # | 제목 형식 | 사용 데이터 | 분석 방법 | 시각화 | 구현 복잡도 |
+|---|-----------|-------------|-----------|--------|------------|
+| W-1 | `[W{n}] 자산 간 상관관계 주간 변화` | 전체 *_close | 이번 주 vs 직전 주 Spearman 행렬 비교, top-5 쌍 추출 | 상관 히트맵 + 변화량 히트맵 | 하 |
+| W-2 | `[W{n}] 매크로 국면은 지금 어디인가` | macro_pmi_us, macro_cpi, rate_fed, rate_spread_10_2 | classify_regime() + 12개월 국면 히스토리 | 타임라인 컬러 바 + 현재 국면 카드 | 하 |
+| W-3 | `[W{n}] 크립토 vs 전통자산 롤링 상관` | crypto_btc, us_sp500, cmd_gold, alt_vix | rolling_spearman(window=30) 3쌍 | 3개 라인 오버레이 | 하 |
+| W-4 | `[W{n}] 국내 금리·환율·KOSPI 3각 관계` | kr_kospi, fx_krw_usd, rate_us10y, rate_spread_10_2 | rolling Spearman(30일) + 산점도 | 롤링 상관 라인 + 산점도 | 하 |
+| W-5 | `[W{n}] 미국→KOSPI 예측 주간 적중률 리뷰` | prediction_log.parquet | 주간 예측 vs 실제 집계, VIX 레짐별 분석 | Rolling Hit Rate 라인 + Confusion Matrix | 중 |
+
+### 월간 (Monthly)
+
+| # | 제목 형식 | 사용 데이터 | 분석 방법 | 시각화 | 구현 복잡도 |
+|---|-----------|-------------|-----------|--------|------------|
+| M-1 | `[YYYY-MM] 글로벌 매크로 월간 종합 리포트` | master 전체 | build_report() 확장 (국면+수익률+상관+백테스팅) | 기존 HTML 리포트 4섹션 | 하 |
+| M-2 | `[YYYY-MM] 삼성전자 S-RIM 적정가 & 팩터` | kr_fin_005930_* | S-RIM 적정가 vs 현재가 괴리율, ROE-수익률 IC | S-RIM 밴드 라인 차트 | 하 |
+| M-3 | `[YYYY-MM] 미국 경기 사이클 좌표` | macro_pmi_us, macro_cpi, macro_gdp_us, macro_unemployment | Z-Score 정규화 후 PMI-CPI 사분면 좌표, 12개월 이동 경로 | 사분면 플롯 (4국면 배경 + 경로) | 중 |
+| M-4 | `[YYYY-MM] 동일가중 멀티에셋 백테스팅 성과` | 6개 자산 close | run_backtest() 월말 리밸런싱, KOSPI 대비 알파/샤프/MDD | 누적 수익률 vs 벤치마크 + 성과 테이블 | 하 |
+| M-5 | `[YYYY-MM] 국면별 자산 성과: 지금 무엇을 사야 하나` | macro_pmi_us, macro_cpi, 전체 *_close | regime_asset_performance() 4국면×자산 평균수익률 | 국면×자산 평균수익률 히트맵 | 중 |
+| M-6 | `[YYYY-MM] 공포-탐욕 지수 분석` | alt_vix, rate_hy_spread, sent_news_global, crypto_btc_dominance, rate_spread_10_2 | 5개 지표 Z-Score 가중 합산 0~100 지수, 30일 이동평균 | 게이지 + 히스토리 라인 | 중 |
+
+---
+
+### 추가 구현 필요 항목 (우선순위 순)
+
+| 우선순위 | 항목 | 파일 | 용도 |
+|----------|------|------|------|
+| 상 | `analysis/prediction.py` 신규 | 신규 | lag_correlation_rank, majority_vote_signal, rolling_logit_predict, rolling_ols_gap, track_prediction_accuracy |
+| 상 | `charts.py` — `plot_gauge()` | 추가 | 공포-탐욕·감성·확률 게이지 |
+| 상 | `charts.py` — `plot_regime_path()` | 추가 | PMI-CPI 사분면 이동 경로 |
+| 중 | `analysis/sentiment.py` 신규 | 신규 | 감성 이동평균, 복합 감성 점수 |
+| 중 | `analysis/fear_greed.py` 신규 | 신규 | 공포-탐욕 지수 계산 |
+| 중 | `charts.py` — `plot_bar_sparkline()` | 추가 | 일간 등락률 바 차트 |
+| 중 | `collectors/kr/stock.py` — 수급 추가 | 수정 | pykrx 외인·기관 순매수 |
+| 중 | `collectors/global_/market.py` — 섹터 ETF 추가 | 수정 | XLK/XLE/XLF/XLV/XLI |
+| 중 | `processors/merger.py` — KOSPI 갭 컬럼 | 수정 | kr_kospi_gap = open(T+1)/close(T)-1 |
+| 하 | `analysis/regime.py` — `regime_transition_matrix()` | 추가 | 국면 천이 확률 행렬 |
+| 하 | `visualization/blog_formatter.py` 신규 | 신규 | 블로그 플랫폼 변환·배포 |
+
+---
+
+### 구현 단계 로드맵
+
+```
+Phase 1 (기존 모듈 조합): D-1, W-2, M-1, M-4 → 즉시 가능
+Phase 2 (plot_gauge + plot_regime_path 추가 후): D-2, D-3, W-3, W-4, M-3
+Phase 3 (prediction.py 구현 후): D-4, D-5, W-5
+Phase 4 (sentiment.py + fear_greed.py 구현 후): M-5, M-6
+Phase 5 (blog_formatter.py 구현 후): 전 콘텐츠 블로그 플랫폼 자동 배포
+```
+
+---
+
+### 작업 진행 규칙
+
+> **각 파트 구현 시작 전 반드시 세부 기획안 파일을 먼저 생성하고 확인받는다.**
+> 파일명: `docs/PLAN_{파트명}.md` (예: `docs/PLAN_D4_kospi_prediction.md`)
+> 세부 기획안 포함 내용: 함수 시그니처, 입출력 스펙, 엣지케이스, 구현 순서
