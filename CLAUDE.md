@@ -42,8 +42,6 @@
 ### 국내 주식
 - pykrx - KOSPI/KOSDAQ 주가, PER/PBR, 외국인/기관 수급, 공매도
 - dart-fss - 재무제표, 배당공시 (DART API)
-- 한국투자증권 KIS API - 실시간 시세, 분봉 (계좌 필요)
-
 ### 국내 거시경제
 - ECOS API (한국은행) - 금리, M2, GDP, CPI
 - 공공데이터포털 API - 상장법인 정보, 기업공시
@@ -60,8 +58,7 @@
 
 ### 암호화폐
 - ccxt - 100+ 거래소 통합 (업비트, 바이낸스 등)
-- CoinGecko API - 시총, 도미넌스, 메타데이터
-- Glassnode - 온체인 데이터 (무료 계층 제한)
+- CoinGecko API - 시총, 도미넌스, 메타데이터 (무료 Demo 키)
 
 ### 시장 심리/포지셔닝
 - CBOE API - Put/Call Ratio, VIX 세부
@@ -111,6 +108,4 @@ COINGECKO_API_KEY=
 GLASSNODE_API_KEY=
 REDDIT_CLIENT_ID=
 REDDIT_CLIENT_SECRET=
-KIS_APP_KEY=
-KIS_APP_SECRET=
 ```

@@ -13,8 +13,10 @@ from config import DART_API_KEY
 
 log = get_logger("kr.financials")
 
-# 프로세스 내 종목코드 → corp_code 매핑 메모리 캐시
+# 프로세스 내 종목코드 → corp_code 문자열 캐시
 _CORP_CODE_MAP: dict[str, str] = {}
+# 프로세스 내 종목코드 → Corp 객체 캐시 (extract_fs 호출용)
+_CORP_OBJ_MAP: dict = {}
 
 
 def get_corp_code(stock_code: str) -> str | None:
@@ -40,13 +42,16 @@ def get_corp_code(stock_code: str) -> str | None:
         dart.set_api_key(api_key=DART_API_KEY)
 
         corp_list = dart.get_corp_list()
-        corp = corp_list.find_by_stock_code(stock_code)
-        if corp is None:
+        result = corp_list.find_by_stock_code(stock_code)
+        if not result:
             log.warning("no DART corp found for stock_code=%s", stock_code)
             return None
 
+        # find_by_stock_code는 버전에 따라 Corp 또는 list[Corp] 반환
+        corp = result[0] if isinstance(result, list) else result
         corp_code: str = corp.corp_code
         _CORP_CODE_MAP[stock_code] = corp_code
+        _CORP_OBJ_MAP[stock_code] = corp
         return corp_code
 
     except Exception as e:
@@ -104,7 +109,15 @@ def get_financial_statements(
         import dart_fss as dart
         dart.set_api_key(api_key=DART_API_KEY)
 
-        company = dart.get_corp(corp_code=corp_code)
+        company = _CORP_OBJ_MAP.get(ticker)
+        if company is None:
+            result = dart.get_corp_list().find_by_stock_code(ticker)
+            if not result:
+                log.warning("Corp object not found for %s", ticker)
+                return pd.DataFrame()
+            company = result[0] if isinstance(result, list) else result
+            _CORP_OBJ_MAP[ticker] = company
+
         fs = company.extract_fs(bgn_de=bgn_de)
     except Exception as e:
         log.warning("dart-fss extract_fs failed for %s: %s", ticker, e)
@@ -129,22 +142,12 @@ def get_financial_statements(
                 log.warning("empty sheet '%s' for %s", fs_key, ticker)
                 continue
 
-            # dart-fss FinancialStatement 시트는 멀티인덱스 컬럼(연도/분기)을 가짐.
-            # 행 인덱스에 계정과목명이 포함됨.
-            matched_row = _find_row(sheet, keywords)
-            if matched_row is None:
+            year_vals = _extract_from_sheet(sheet, keywords)
+            if not year_vals:
                 log.warning("account not found (keywords=%s) for %s", keywords, ticker)
                 continue
 
-            for col in sheet.columns:
-                year = _extract_year(col)
-                if year is None:
-                    continue
-                val = matched_row[col]
-                try:
-                    val = float(str(val).replace(",", "").strip())
-                except (ValueError, TypeError):
-                    continue
+            for year, val in year_vals.items():
                 records.setdefault(year, {})[col_name] = val
 
         except Exception as e:
@@ -229,37 +232,58 @@ def get_key_ratios(
 # 내부 헬퍼
 # ---------------------------------------------------------------------------
 
-def _find_row(sheet: pd.DataFrame, keywords: list[str]) -> pd.Series | None:
+_META_FIELDS = frozenset(
+    {"concept_id", "label_ko", "label_en", "class0", "class1", "class2", "class3", "class4"}
+)
+
+
+def _extract_from_sheet(sheet: pd.DataFrame, keywords: list[str]) -> dict[int, float]:
     """
-    dart-fss 시트에서 계정과목 키워드와 일치하는 행을 반환.
-    행 인덱스(또는 '계정과목' 컬럼)에서 검색.
+    dart-fss MultiIndex 컬럼 시트에서 키워드에 해당하는 계정과목의 연도별 값을 추출.
+
+    컬럼 구조: (date_str 'YYYYMMDD' | stmt_name, sub_field)
+    계정과목명은 sub_field == 'label_ko' 컬럼에 위치.
+
+    Returns:
+        {연도(int): 값(float)} 딕셔너리. 매칭 실패 시 빈 딕셔너리.
     """
-    # 인덱스 기반 검색
+    # label_ko 컬럼 탐색
+    label_ko_col = next((c for c in sheet.columns if c[1] == "label_ko"), None)
+    if label_ko_col is None:
+        return {}
+
+    # 키워드로 행 탐색
+    row = None
     for kw in keywords:
-        for idx_val in sheet.index:
-            if kw in str(idx_val):
-                return sheet.loc[idx_val]
+        mask = sheet[label_ko_col].astype(str).str.contains(kw, na=False)
+        if mask.any():
+            row = sheet[mask].iloc[0]
+            break
 
-    # '계정과목' 컬럼이 존재하는 경우
-    for candidate in ("계정과목", "account_nm"):
-        if candidate in sheet.columns:
-            for kw in keywords:
-                mask = sheet[candidate].astype(str).str.contains(kw, na=False)
-                if mask.any():
-                    return sheet[mask].iloc[0]
+    if row is None:
+        return {}
 
-    return None
+    # 연도별 값 수집 (메타 컬럼 제외)
+    # BS: 'YYYYMMDD' (단일 날짜) / IS: 'YYYYMMDD-YYYYMMDD' (기간)
+    result: dict[int, float] = {}
+    for col in sheet.columns:
+        if col[1] in _META_FIELDS:
+            continue
+        date_str = col[0]
+        if not isinstance(date_str, str):
+            continue
+        # 두 가지 날짜 형식 모두 처리
+        if len(date_str) == 8 and date_str.isdigit():
+            year = int(date_str[:4])   # BS: '20251231'
+        elif len(date_str) == 17 and date_str[8] == '-' and date_str[:8].isdigit():
+            year = int(date_str[9:13]) # IS: '20250101-20251231' → 종료연도
+        else:
+            continue
+        try:
+            val = float(str(row[col]).replace(",", "").strip())
+            if not pd.isna(val):
+                result[year] = val
+        except (ValueError, TypeError):
+            pass
 
-
-def _extract_year(col) -> int | None:
-    """
-    dart-fss 컬럼값에서 회계연도(4자리 정수)를 추출.
-    컬럼은 문자열('20231231'), Timestamp, tuple 등 다양한 형태일 수 있음.
-    """
-    col_str = str(col)
-    # 'YYYY' 패턴 우선 탐색
-    import re
-    m = re.search(r"(20\d{2})", col_str)
-    if m:
-        return int(m.group(1))
-    return None
+    return result

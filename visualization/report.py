@@ -16,6 +16,7 @@ import plotly.io as pio
 from collectors.base import get_logger
 from config import BASE_DIR
 from visualization.charts import plot_correlation_heatmap, plot_cumulative_returns
+from visualization.disclaimer import get_html_disclaimer
 
 log = get_logger("visualization.report")
 
@@ -56,16 +57,7 @@ _HTML_TEMPLATE = """\
   <p class="meta">생성일: {generated_at} &nbsp;|&nbsp; 데이터 기간: {date_range}</p>
   {sections}
   <div class="disclaimer">
-    <strong>데이터 출처</strong><br>
-    국내 주식·재무: 금융감독원 DART, 한국거래소(pykrx) &nbsp;|&nbsp;
-    국내 거시: 한국은행 ECOS &nbsp;|&nbsp;
-    글로벌 시장: Yahoo Finance &nbsp;|&nbsp;
-    미국 거시: Federal Reserve Bank of St. Louis (FRED) &nbsp;|&nbsp;
-    에너지: U.S. Energy Information Administration (EIA)<br><br>
-    <strong>면책 고지</strong><br>
-    본 리포트는 수집된 공개 데이터를 기반으로 자동 생성된 분석 결과물입니다.
-    원시 데이터를 그대로 재배포하지 않으며, 모든 차트는 가공·분석된 파생 지표입니다.
-    투자 조언이 아니며, 투자 결과에 대한 책임은 전적으로 본인에게 있습니다.
+    {{disclaimer}}
   </div>
 </body>
 </html>
@@ -265,6 +257,7 @@ def build_report(
         generated_at=today,
         date_range=date_range if not master.empty else "N/A",
         sections=sections_html,
+        disclaimer=get_html_disclaimer(lang="ko", length="full"),
     )
 
     out.write_text(html, encoding="utf-8")

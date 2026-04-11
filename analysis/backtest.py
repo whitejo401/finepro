@@ -103,7 +103,8 @@ def backtest_equal_weight(
     sig = signal.loc[common_dates, common_cols]
 
     # 룩어헤드 바이어스 방지: 신호를 1일 지연
-    sig_shifted = sig.shift(1).infer_objects(copy=False).fillna(False).astype(bool)
+    _s = sig.shift(1)
+    sig_shifted = _s.where(_s.notna(), other=False).astype(bool)
 
     # 리밸런싱 날짜 계산
     rebal_dates = rets.resample(rebal_freq).last().index

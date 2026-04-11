@@ -19,7 +19,7 @@ fine/
 │       ├── __init__.py
 │       ├── market.py           # yfinance (지수, 원자재, 환율, VIX)
 │       ├── macro.py            # fredapi, wbgapi, OECD, EIA
-│       ├── crypto.py           # ccxt, CoinGecko, Glassnode
+│       ├── crypto.py           # ccxt, CoinGecko
 │       └── alt.py              # NewsAPI, GDELT, pytrends, praw, EPU, CFTC
 ├── processors/
 │   ├── __init__.py
