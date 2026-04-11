@@ -175,31 +175,43 @@ data/processed/
 
 ### 추가 구현 필요 항목 (우선순위 순)
 
-| 우선순위 | 항목 | 파일 | 용도 |
-|----------|------|------|------|
-| 상 | `analysis/prediction.py` 신규 | 신규 | lag_correlation_rank, majority_vote_signal, rolling_logit_predict, rolling_ols_gap, track_prediction_accuracy |
-| 상 | `charts.py` — `plot_gauge()` | 추가 | 공포-탐욕·감성·확률 게이지 |
-| 상 | `charts.py` — `plot_regime_path()` | 추가 | PMI-CPI 사분면 이동 경로 |
-| 중 | `analysis/sentiment.py` 신규 | 신규 | 감성 이동평균, 복합 감성 점수 |
-| 중 | `analysis/fear_greed.py` 신규 | 신규 | 공포-탐욕 지수 계산 |
-| 중 | `charts.py` — `plot_bar_sparkline()` | 추가 | 일간 등락률 바 차트 |
-| 중 | `collectors/kr/stock.py` — 수급 추가 | 수정 | pykrx 외인·기관 순매수 |
-| 중 | `collectors/global_/market.py` — 섹터 ETF 추가 | 수정 | XLK/XLE/XLF/XLV/XLI |
-| 중 | `processors/merger.py` — KOSPI 갭 컬럼 | 수정 | kr_kospi_gap = open(T+1)/close(T)-1 |
-| 하 | `analysis/regime.py` — `regime_transition_matrix()` | 추가 | 국면 천이 확률 행렬 |
-| 하 | `visualization/blog_formatter.py` 신규 | 신규 | 블로그 플랫폼 변환·배포 |
+| 우선순위 | 항목 | 파일 | 용도 | 상태 |
+|----------|------|------|------|------|
+| 상 | `analysis/prediction.py` 신규 | 신규 | lag_correlation_rank, majority_vote_signal, rolling_logit_predict | ✅ |
+| 상 | `charts.py` — `plot_gauge()` | 추가 | 공포-탐욕·감성·확률 게이지 | ✅ |
+| 상 | `charts.py` — `plot_regime_path()` | 추가 | PMI-CPI 사분면 이동 경로 | ✅ |
+| 중 | `analysis/sentiment.py` 신규 | 신규 | 감성 이동평균, 복합 감성 점수 | ✅ |
+| 중 | `analysis/fear_greed.py` 신규 | 신규 | 공포-탐욕 지수 계산 | ✅ |
+| 중 | `visualization/blog_formatter.py` 신규 | 신규 | 블로그 플랫폼 변환·배포 | ✅ |
+| 중 | `collectors/global_/whale.py` 신규 | 신규 | Whale Alert + Glassnode 고래 온체인 | ✅ |
+| 중 | `collectors/global_/institutions.py` 신규 | 신규 | CoinGecko 기업 BTC, ETF, SEC 13F | ✅ |
+| 중 | `analysis/crypto_intel.py` 신규 | 신규 | 고래 신호, ETF 분석, 기관 축적/분산 | ✅ |
+| 중 | `collectors/kr/stock.py` — 수급 추가 | 수정 | pykrx 외인·기관 순매수 | ⬜ |
+| 중 | `collectors/global_/market.py` — 섹터 ETF 추가 | 수정 | XLK/XLE/XLF/XLV/XLI | ⬜ |
+| 중 | `processors/merger.py` — KOSPI 갭 컬럼 | 수정 | kr_kospi_gap = open(T+1)/close(T)-1 | ⬜ |
+| 하 | `analysis/regime.py` — `regime_transition_matrix()` | 추가 | 국면 천이 확률 행렬 | ⬜ |
 
 ---
 
 ### 구현 단계 로드맵
 
 ```
-Phase 1 (기존 모듈 조합): D-1, W-2, M-1, M-4 → 즉시 가능
-Phase 2 (plot_gauge + plot_regime_path 추가 후): D-2, D-3, W-3, W-4, M-3
-Phase 3 (prediction.py 구현 후): D-4, D-5, W-5
-Phase 4 (sentiment.py + fear_greed.py 구현 후): M-5, M-6
-Phase 5 (blog_formatter.py 구현 후): 전 콘텐츠 블로그 플랫폼 자동 배포
+Phase 1 (기존 모듈 조합): D-1, W-2, M-1, M-4                          ✅ 완료
+Phase 2 (plot_gauge + plot_regime_path 추가): D-2, D-3, W-3, W-4, M-3 ✅ 완료
+Phase 3 (prediction.py): D-4, D-5, W-5                                ✅ 완료
+Phase 4 (sentiment.py + fear_greed.py): M-5, M-6                      ✅ 완료
+Phase 5 (blog_formatter.py): 블로그 플랫폼 자동 변환·배포               ✅ 완료
+Phase 6 (whale.py + institutions.py + crypto_intel.py): D-6, W-6      ✅ 완료
 ```
+
+### 신규 API 키 필요 (Phase 6)
+
+| 키 | 서비스 | 상태 |
+|----|--------|------|
+| `WHALE_ALERT_API_KEY` | https://whale-alert.io | 미발급 |
+| `GLASSNODE_API_KEY` | https://glassnode.com | 미발급 |
+| `ECOS_API_KEY` | 한국은행 | 심사 중 |
+| `REDDIT_CLIENT_ID/SECRET` | Reddit | 심사 중 |
 
 ---
 
