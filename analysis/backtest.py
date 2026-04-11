@@ -43,7 +43,7 @@ def calc_returns(prices: pd.DataFrame) -> pd.DataFrame:
         log.warning("calc_returns: 빈 DataFrame 입력 — 빈 결과 반환")
         return pd.DataFrame()
 
-    returns = prices.pct_change()
+    returns = prices.pct_change(fill_method=None)
     log.debug("calc_returns: shape=%s", returns.shape)
     return returns
 

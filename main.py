@@ -72,6 +72,26 @@ def main():
     except Exception as e:
         log.warning("dart collector failed: %s", e)
 
+    # ── 5. 암호화폐 (CoinGecko) ──────────────────────────────────────────────
+    try:
+        from collectors.global_.crypto import get_crypto_dataset
+        df_crypto = get_crypto_dataset(start=start, end=end, use_cache=use_cache)
+        if not df_crypto.empty:
+            frames.append(df_crypto)
+            log.info("crypto: %d rows x %d cols", *df_crypto.shape)
+    except Exception as e:
+        log.warning("crypto collector failed: %s", e)
+
+    # ── 6. 뉴스 감성 (NewsAPI) ───────────────────────────────────────────────
+    try:
+        from collectors.global_.alt import get_news_sentiment
+        df_news = get_news_sentiment(start=start, end=end, use_cache=use_cache)
+        if not df_news.empty:
+            frames.append(df_news)
+            log.info("news sentiment: %d rows x %d cols", *df_news.shape)
+    except Exception as e:
+        log.warning("news sentiment collector failed: %s", e)
+
     if not frames:
         log.error("No data collected — check API keys and network.")
         return
