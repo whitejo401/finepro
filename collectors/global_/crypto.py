@@ -36,6 +36,27 @@ def _get_cg_client():
     return CoinGeckoAPI(demo_api_key=COINGECKO_API_KEY)
 
 
+_CG_MAX_HISTORY_DAYS = 365  # Demo API 무료 플랜 최대 조회 가능 기간
+
+
+def _clamp_start(start: str, end: str) -> str | None:
+    """
+    CoinGecko 무료 플랜 365일 제한에 맞게 start를 조정한다.
+    전체 범위가 제한 밖이면 None 반환.
+    """
+    limit_start = pd.Timestamp.now().normalize() - pd.Timedelta(days=_CG_MAX_HISTORY_DAYS)
+    start_ts = pd.Timestamp(start)
+    end_ts   = pd.Timestamp(end)
+
+    if end_ts < limit_start:
+        return None  # 범위 전체가 365일 초과 — 빈 결과
+    if start_ts < limit_start:
+        clamped = limit_start.strftime("%Y-%m-%d")
+        log.info("CoinGecko 365일 제한: start %s → %s", start, clamped)
+        return clamped
+    return start
+
+
 def _fetch_coin_prices(
     cg,
     coin_id: str,
@@ -45,13 +66,19 @@ def _fetch_coin_prices(
     """
     CoinGecko market_chart/range API로 일별 종가 조회.
 
+    무료 Demo 플랜은 최근 365일만 허용. start를 자동 클램핑.
+
     Returns:
         DatetimeIndex(UTC→date) Series, 이름 = crypto_{coin_id}_close
     """
-    import datetime as dt
+    clamped = _clamp_start(start, end)
+    if clamped is None:
+        log.info("CoinGecko: %s 요청 범위가 365일 제한 초과 — 스킵", coin_id)
+        return pd.Series(dtype=float)
+    start = clamped
 
     start_ts = int(pd.Timestamp(start).timestamp())
-    end_ts = int(pd.Timestamp(end).timestamp())
+    end_ts   = int(pd.Timestamp(end).timestamp())
 
     try:
         data = cg.get_coin_market_chart_range_by_id(
@@ -93,8 +120,14 @@ def _fetch_global_metrics(cg, start: str, end: str) -> pd.DataFrame:
     Returns:
         DataFrame with columns: crypto_total_mcap, crypto_btc_dominance
     """
+    clamped = _clamp_start(start, end)
+    if clamped is None:
+        log.info("CoinGecko global metrics: 365일 제한 초과 — 스킵")
+        return pd.DataFrame()
+    start = clamped
+
     start_ts = int(pd.Timestamp(start).timestamp())
-    end_ts = int(pd.Timestamp(end).timestamp())
+    end_ts   = int(pd.Timestamp(end).timestamp())
 
     frames = {}
 

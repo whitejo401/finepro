@@ -41,8 +41,11 @@ def main():
     # ── 1. 글로벌 시장 (yfinance) ────────────────────────────────────────────
     try:
         from collectors.global_.market import get_prices
-        tickers = ["us_sp500", "us_nasdaq", "kr_kospi", "cmd_wti", "cmd_gold",
-                   "fx_krw_usd", "alt_vix", "rate_us10y"]
+        tickers = ["us_sp500", "us_nasdaq", "cmd_wti", "cmd_gold",
+                   "fx_krw_usd", "alt_vix", "rate_us10y",
+                   "us_sect_tech", "us_sect_energy", "us_sect_fin",
+                   "us_sect_health", "us_sect_indus"]
+        # kr_kospi는 2단계에서 OHLCV 전체 수집하므로 여기서 제외
         df_market = get_prices(tickers, start=start, end=end, use_cache=use_cache)
         if not df_market.empty:
             frames.append(df_market)
@@ -50,15 +53,25 @@ def main():
     except Exception as e:
         log.warning("market collector failed: %s", e)
 
-    # ── 2. 국내 주식 (pykrx) ────────────────────────────────────────────────
+    # ── 2. 국내 주식 (yfinance KOSPI OHLCV + pykrx fallback) ─────────────────
     try:
-        from collectors.kr.stock import get_index_ohlcv
-        df_kospi = get_index_ohlcv("1001", start=start, end=end, use_cache=use_cache)
-        if not df_kospi.empty:
-            frames.append(df_kospi)
-            log.info("kr stock (KOSPI index): %d rows x %d cols", *df_kospi.shape)
+        from collectors.global_.market import get_price
+        df_kospi_ohlcv = get_price("kr_kospi", start=start, end=end, use_cache=use_cache)
+        if not df_kospi_ohlcv.empty:
+            frames.append(df_kospi_ohlcv)
+            log.info("kr kospi ohlcv (yf): %d rows x %d cols", *df_kospi_ohlcv.shape)
     except Exception as e:
-        log.warning("kr stock collector failed: %s", e)
+        log.warning("kr kospi ohlcv collector failed: %s", e)
+
+    # ── 2-b. 국내 수급 (pykrx 외인·기관 순매수) ─────────────────────────────
+    try:
+        from collectors.kr.stock import get_market_net_buying
+        df_net = get_market_net_buying("KOSPI", start=start, end=end, use_cache=use_cache)
+        if not df_net.empty:
+            frames.append(df_net)
+            log.info("kr market net buying: %d rows x %d cols", *df_net.shape)
+    except Exception as e:
+        log.warning("kr market net buying collector failed: %s", e)
 
     # ── 3. 미국 거시 (FRED + EIA) ────────────────────────────────────────────
     try:

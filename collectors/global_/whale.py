@@ -107,6 +107,8 @@ def get_large_transactions_blockchair(
     start_dt = datetime.strptime(start, "%Y-%m-%d")
     end_dt   = datetime.strptime(end,   "%Y-%m-%d")
     all_rows: list[dict] = []
+    consecutive_errors = 0
+    _MAX_CONSECUTIVE_ERRORS = 3  # 연속 실패 시 조기 종료
 
     current = start_dt
     while current <= end_dt:
@@ -128,8 +130,15 @@ def get_large_transactions_blockchair(
                 timeout=20,
                 headers={"Accept": "application/json"},
             )
-            if resp.status_code == 429:
-                log.warning("Blockchair: rate limit (429) — %s 스킵", date_str)
+            if resp.status_code in (429, 430):
+                consecutive_errors += 1
+                log.warning(
+                    "Blockchair: 요청 한도 초과 (%d) — %s 스킵 (연속 실패 %d/%d)",
+                    resp.status_code, date_str, consecutive_errors, _MAX_CONSECUTIVE_ERRORS,
+                )
+                if consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
+                    log.warning("Blockchair: 연속 %d회 실패 — IP 블랙리스트 추정, 수집 중단", _MAX_CONSECUTIVE_ERRORS)
+                    break
                 current += timedelta(days=1)
                 time.sleep(5)
                 continue
@@ -138,8 +147,14 @@ def get_large_transactions_blockchair(
                 break
             resp.raise_for_status()
             data = resp.json()
+            consecutive_errors = 0  # 성공 시 리셋
         except Exception as e:
-            log.warning("Blockchair [%s %s]: %s", coin, date_str, e)
+            consecutive_errors += 1
+            log.warning("Blockchair [%s %s]: %s (연속 실패 %d/%d)",
+                        coin, date_str, e, consecutive_errors, _MAX_CONSECUTIVE_ERRORS)
+            if consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
+                log.warning("Blockchair: 연속 %d회 실패 — 수집 중단", _MAX_CONSECUTIVE_ERRORS)
+                break
             current += timedelta(days=1)
             time.sleep(_BLOCKCHAIR_MIN_INTERVAL)
             continue

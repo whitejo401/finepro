@@ -37,6 +37,12 @@ TICKERS = {
     "alt_vix":    "^VIX",
     "rate_us10y": "^TNX",
     "rate_us2y":  "^IRX",
+    # US Sector ETFs (SPDR)
+    "us_sect_tech":   "XLK",
+    "us_sect_energy": "XLE",
+    "us_sect_fin":    "XLF",
+    "us_sect_health": "XLV",
+    "us_sect_indus":  "XLI",
 }
 
 

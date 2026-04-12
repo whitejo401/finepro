@@ -120,7 +120,31 @@ def merge_dataframes(
     merged = merged.ffill(limit=5)
     merged = merged.bfill(limit=1)
 
+    # 파생 컬럼 추가
+    merged = _add_derived_columns(merged)
+
     return merged
+
+
+def _add_derived_columns(master: pd.DataFrame) -> pd.DataFrame:
+    """
+    병합 후 파생 컬럼을 추가한다.
+
+    kr_kospi_gap : 다음 거래일 KOSPI 갭 (open[T+1] / close[T] - 1)
+                   D-4/D-5 리포트의 갭 예측 타겟 변수로 사용.
+    """
+    # KOSPI 갭: yfinance KOSPI open/close 컬럼 존재 시 계산
+    open_col  = "kr_kospi_open"
+    close_col = "kr_kospi_close"
+    if open_col in master.columns and close_col in master.columns:
+        master = master.copy()
+        # shift(-1): 오늘 close 대비 내일 open 수익률
+        master["kr_kospi_gap"] = (
+            master[open_col].shift(-1) / master[close_col] - 1
+        )
+        log.info("_add_derived_columns: kr_kospi_gap 추가")
+
+    return master
 
 
 def build_master_dataset(

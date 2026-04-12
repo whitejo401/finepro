@@ -141,6 +141,42 @@ def current_regime(
 # 종합 요약
 # ---------------------------------------------------------------------------
 
+def regime_transition_matrix(
+    regime_series: pd.Series,
+) -> pd.DataFrame:
+    """
+    국면 간 천이 확률 행렬.
+
+    연속된 두 기간의 국면 쌍을 집계하여
+    'from 국면 → to 국면' 확률을 계산한다.
+
+    Args:
+        regime_series: classify_regime() 결과 Series
+
+    Returns:
+        DataFrame (index=from_regime, columns=to_regime, values=확률 0~1).
+        행 합계 = 1.0. 데이터 부족 시 빈 DataFrame 반환.
+    """
+    s = regime_series.dropna()
+    if len(s) < 2:
+        log.warning("regime_transition_matrix: 데이터 부족 (n=%d)", len(s))
+        return pd.DataFrame()
+
+    from_vals = s.iloc[:-1].values
+    to_vals   = s.iloc[1:].values
+
+    matrix = pd.crosstab(
+        pd.Series(from_vals, name="from"),
+        pd.Series(to_vals,   name="to"),
+        normalize="index",
+    )
+
+    # 정의된 4개 국면 순서로 정렬 (없는 국면은 0 채움)
+    present = [r for r in _REGIMES if r in matrix.index or r in matrix.columns]
+    matrix = matrix.reindex(index=present, columns=present, fill_value=0.0)
+    return matrix.round(3)
+
+
 def regime_summary(
     master: pd.DataFrame,
     pmi_col: str = "macro_pmi_us",
