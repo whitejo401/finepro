@@ -6,17 +6,14 @@ collectors/global_/whale.py
 데이터 소스 (모두 무료, API 키 불필요):
   1. Blockchair API    — BTC/ETH 대형 트랜잭션 필터 (≥100만 USD), 키 불필요, 1440 req/일
   2. Mempool.space API — Bitcoin 최근 블록 대형 트랜잭션, 키 불필요, 제한 없음
-  3. CryptoQuant API   — 거래소 BTC 순유입/유출 (무료 플랜, 키 필요)
 
-※ Whale Alert → 유료 전용 정책으로 제거 (2024년 이후 무료 플랜 폐지)
+※ Whale Alert    → 유료 전용 정책으로 제거 (2024년 이후 무료 플랜 폐지)
+※ CryptoQuant    → 무료 플랜은 price-ohlcv 만 제공, exchange-flows 는 유료 전용
 
 출력 컬럼 (master 병합용):
   whale_alert_count           : 당일 ≥min_usd 대형 이동 건수
   whale_alert_volume_usd      : 당일 총 이동 금액 (백만 USD)
   whale_consolidation_ratio   : 통합 트랜잭션 비율 (input > output → 거래소 유입 추정)
-  whale_btc_exchange_inflow   : 거래소 BTC 순유입 (BTC, CryptoQuant)
-  whale_btc_exchange_outflow  : 거래소 BTC 순유출 (BTC, CryptoQuant)
-  whale_btc_exchange_net      : 순유출 - 순유입 (양수=유출 우세=강세 신호)
 """
 from __future__ import annotations
 
@@ -38,9 +35,8 @@ CACHE_DIR = BASE_DIR / "data" / "cache" / "whale"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # API endpoints (모두 공개, 키 불필요)
-_BLOCKCHAIR_BASE  = "https://api.blockchair.com"
-_MEMPOOL_BASE     = "https://mempool.space/api"
-_CRYPTOQUANT_BASE = "https://api.cryptoquant.com/v1"
+_BLOCKCHAIR_BASE = "https://api.blockchair.com"
+_MEMPOOL_BASE    = "https://mempool.space/api"
 
 # Blockchair 1440 req/day 보호: 요청 간 최소 간격(초)
 _BLOCKCHAIR_MIN_INTERVAL = 0.7
@@ -327,131 +323,12 @@ def get_mempool_large_txs(
 
 
 # ---------------------------------------------------------------------------
-# Glassnode API (무료 티어: 일별 온체인 지표)
+# CryptoQuant 메모
 # ---------------------------------------------------------------------------
-
-def get_cryptoquant_exchange_flow(
-    start: str,
-    end: str | None = None,
-    use_cache: bool = True,
-) -> pd.DataFrame:
-    """
-    CryptoQuant API로 BTC 거래소 순유입/유출을 수집한다.
-
-    CRYPTOQUANT_API_KEY 환경변수가 없으면 빈 DataFrame 반환.
-    무료 플랜: 일별 데이터, 전체 거래소 합산 유입/유출.
-
-    API 문서: https://cryptoquant.com/docs
-
-    Args:
-        start    : 시작일 'YYYY-MM-DD'
-        end      : 종료일 'YYYY-MM-DD', None이면 오늘
-        use_cache: 캐시 사용 여부
-
-    Returns:
-        DataFrame (index=날짜, columns: whale_btc_exchange_inflow,
-                   whale_btc_exchange_outflow, whale_btc_exchange_net)
-    """
-    import os
-    api_key = os.environ.get("CRYPTOQUANT_API_KEY", "")
-    if not api_key:
-        log.warning("get_cryptoquant_exchange_flow: CRYPTOQUANT_API_KEY 없음 — 스킵")
-        return pd.DataFrame()
-
-    end = end or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    ck = _cache_key("cryptoquant_flow", start, end)
-
-    if use_cache:
-        cached = _load_cache(ck)
-        if cached:
-            df = pd.DataFrame(cached)
-            if not df.empty and "index" in df.columns:
-                df = df.set_index("index")
-                df.index = pd.to_datetime(df.index)
-            return df
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type":  "application/json",
-    }
-
-    # CryptoQuant v1 엔드포인트: exchange-flows (전체 거래소 합산)
-    # window=day, exchange=all
-    endpoints = [
-        ("btc/exchange-flows/inflow",  "whale_btc_exchange_inflow",  "inflow_total"),
-        ("btc/exchange-flows/outflow", "whale_btc_exchange_outflow", "outflow_total"),
-    ]
-
-    frames: list[pd.Series] = []
-    for endpoint, col_name, value_key in endpoints:
-        params = {
-            "window":    "day",
-            "exchange":  "all",
-            "from":      start,
-            "to":        end,
-            "limit":     500,
-        }
-        try:
-            resp = requests.get(
-                f"{_CRYPTOQUANT_BASE}/{endpoint}",
-                headers=headers,
-                params=params,
-                timeout=20,
-            )
-            if resp.status_code == 401:
-                log.warning("CryptoQuant: 인증 실패 (401) — API 키 확인 필요")
-                break
-            if resp.status_code == 403:
-                log.warning("CryptoQuant: 접근 권한 없음 (403) — 플랜 확인 필요")
-                break
-            if resp.status_code == 429:
-                log.warning("CryptoQuant: 요청 한도 초과 (429) — 잠시 후 재시도")
-                time.sleep(5)
-                continue
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            log.warning("CryptoQuant API 오류 [%s]: %s", endpoint, e)
-            continue
-
-        items = data.get("result", {}).get("data", [])
-        if not items:
-            continue
-
-        series_data: dict = {}
-        for item in items:
-            # CryptoQuant 응답: {"date": "2024-01-01", "inflow_total": 12345.67, ...}
-            date_str = item.get("date") or item.get("datetime", "")
-            val = item.get(value_key) or item.get("value")
-            if date_str and val is not None:
-                try:
-                    series_data[pd.Timestamp(date_str)] = float(val)
-                except (ValueError, TypeError):
-                    continue
-
-        if not series_data:
-            continue
-
-        s = pd.Series(series_data, name=col_name)
-        s.index = pd.to_datetime(s.index).normalize()
-        frames.append(s)
-        time.sleep(0.3)
-
-    if not frames:
-        return pd.DataFrame()
-
-    result = pd.concat(frames, axis=1)
-
-    # 순유출 = 유출 - 유입 (양수: 거래소 자금 순유출 → 강세 신호)
-    if "whale_btc_exchange_inflow" in result.columns and "whale_btc_exchange_outflow" in result.columns:
-        result["whale_btc_exchange_net"] = (
-            result["whale_btc_exchange_outflow"] - result["whale_btc_exchange_inflow"]
-        )
-
-    result.index.name = None
-    _save_cache(ck, result.reset_index().rename(columns={result.index.name or "index": "index"}).to_dict("list"))
-    log.info("get_cryptoquant_exchange_flow: %d행 수집 (%s ~ %s)", len(result), start, end)
-    return result
+# 무료 플랜은 /v1/my/discovery/endpoints 기준
+# {btc,eth,trx,xrp,alt,erc20,stablecoin}/market-data/price-ohlcv 만 허용.
+# exchange-flows (inflow/outflow) 등 온체인 지표는 유료 플랜 전용.
+# price-ohlcv 는 CoinGecko/yfinance 로 이미 커버되므로 이 파이프라인에서 사용하지 않음.
 
 
 # ---------------------------------------------------------------------------
@@ -540,11 +417,6 @@ def get_whale_dataset(
         agg = aggregate_large_transactions(raw_blockchair)
         if not agg.empty:
             frames.append(agg)
-
-    # CryptoQuant 거래소 유입/유출
-    df_cq = get_cryptoquant_exchange_flow(start, end, use_cache=use_cache)
-    if not df_cq.empty:
-        frames.append(df_cq)
 
     if not frames:
         log.warning("get_whale_dataset: 수집된 고래 데이터 없음")
