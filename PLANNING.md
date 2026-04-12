@@ -208,10 +208,11 @@ Phase 6 (whale.py + institutions.py + crypto_intel.py): D-6, W-6      ✅ 완료
 
 | 키 | 서비스 | 상태 |
 |----|--------|------|
-| `WHALE_ALERT_API_KEY` | https://whale-alert.io | 미발급 |
 | `CRYPTOQUANT_API_KEY` | https://cryptoquant.com | 미발급 |
 | `ECOS_API_KEY` | 한국은행 | 심사 중 |
 | `REDDIT_CLIENT_ID/SECRET` | Reddit | 심사 중 |
+
+> Whale Alert → 무료 플랜 폐지로 제거. Blockchair/Mempool.space(키 불필요)로 대체.
 
 ---
 
