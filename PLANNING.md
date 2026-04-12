@@ -202,6 +202,7 @@ Phase 3 (prediction.py): D-4, D-5, W-5                                ✅ 완료
 Phase 4 (sentiment.py + fear_greed.py): M-5, M-6                      ✅ 완료
 Phase 5 (blog_formatter.py): 블로그 플랫폼 자동 변환·배포               ✅ 완료
 Phase 6 (whale.py + institutions.py + crypto_intel.py): D-6, W-6      ✅ 완료
+Phase 7 (미구현 리포트): W-1, M-2, M-4                                 ✅ 완료
 ```
 
 ### 신규 API 키 필요 (Phase 6)

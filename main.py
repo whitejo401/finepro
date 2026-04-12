@@ -20,8 +20,8 @@ def parse_args():
         "--mode",
         choices=["daily", "weekly", "monthly", "all",
                  "d1", "d2", "d3", "d4", "d5", "d6",
-                 "w2", "w3", "w4", "w5", "w6",
-                 "m1", "m3", "m5", "m6"],
+                 "w1", "w2", "w3", "w4", "w5", "w6",
+                 "m1", "m2", "m3", "m4", "m5", "m6"],
         default="all",
         help="생성할 리포트 종류",
     )
@@ -158,13 +158,16 @@ def main():
         "d4": ("build_d4_report",      "KOSPI 예측"),
         "d5": ("build_d5_report",      "미국→KOSPI 선행"),
         "d6": ("build_d6_report",      "고래·기관 스냅샷"),
+        "w1": ("build_w1_report",      "자산 상관 주간 변화"),
         "w2": ("build_weekly_report",  "주간 국면"),
         "w3": ("build_w3_report",      "크립토 상관"),
         "w4": ("build_w4_report",      "KOSPI 3각"),
         "w5": ("build_w5_report",      "예측 적중률"),
         "w6": ("build_w6_report",      "기관 포트폴리오"),
         "m1": ("build_report",         "월간 종합"),
+        "m2": ("build_m2_report",      "S-RIM 적정가"),
         "m3": ("build_m3_report",      "경기 사이클"),
+        "m4": ("build_m4_report",      "백테스팅"),
         "m5": ("build_m5_report",      "국면별 자산 성과"),
         "m6": ("build_m6_report",      "공포-탐욕 지수"),
     }
@@ -175,9 +178,9 @@ def main():
     elif mode == "daily":
         targets = ["d1", "d2", "d3", "d4", "d5", "d6"]
     elif mode == "weekly":
-        targets = ["w2", "w3", "w4", "w5", "w6"]
+        targets = ["w1", "w2", "w3", "w4", "w5", "w6"]
     elif mode == "monthly":
-        targets = ["m1", "m3", "m5", "m6"]
+        targets = ["m1", "m2", "m3", "m4", "m5", "m6"]
     else:
         targets = [mode]
 

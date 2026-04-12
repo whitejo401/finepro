@@ -2114,3 +2114,454 @@ def build_w6_report(
     out.write_text(html, encoding="utf-8")
     log.info("build_w6_report: saved to %s", out)
     return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_w1_report  (W-1 자산 간 상관관계 주간 변화)
+# ---------------------------------------------------------------------------
+
+def build_w1_report(
+    master: pd.DataFrame,
+    week_end: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    W-1 자산 간 상관관계 주간 변화 리포트.
+
+    포함 섹션:
+      1. 이번 주 Spearman 상관 히트맵
+      2. 주간 변화량 히트맵 (이번 주 - 직전 주)
+      3. 상관 변화 Top-5 자산 쌍 테이블
+    """
+    weekly_dir = REPORTS_DIR / "weekly"
+    weekly_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = week_end or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date.today()))
+    out = Path(output_path) if output_path else weekly_dir / f"w1_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+    close_cols = _select_close_cols(master, max_cols=15)
+
+    if len(close_cols) < 2:
+        log.warning("build_w1_report: close 컬럼 부족 (%d개)", len(close_cols))
+        return _save_empty_report(out, "W-1 자산 상관관계", ref_date)
+
+    ref_ts  = pd.Timestamp(ref_date)
+    w0_end  = ref_ts
+    w0_start = ref_ts - pd.Timedelta(days=6)   # 이번 주 (5 거래일 ≈ 7일)
+    w1_end   = w0_start - pd.Timedelta(days=1)
+    w1_start = w1_end   - pd.Timedelta(days=6)  # 직전 주
+
+    df_w0 = master.loc[w0_start:w0_end, close_cols].dropna(how="all")
+    df_w1 = master.loc[w1_start:w1_end, close_cols].dropna(how="all")
+
+    # ── 이번 주 히트맵 ────────────────────────────────────────────────────
+    if not df_w0.empty and len(df_w0) >= 2:
+        try:
+            fig_now = plot_correlation_heatmap(df_w0, f"이번 주 자산 상관관계 ({w0_start.date()} ~ {w0_end.date()})")
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="이번 주 Spearman 상관관계",
+                chart_html=_fig_to_html(fig_now),
+            ))
+        except Exception as e:
+            log.warning("build_w1_report: 이번 주 히트맵 실패: %s", e)
+
+    # ── 변화량 히트맵 ─────────────────────────────────────────────────────
+    if not df_w0.empty and not df_w1.empty and len(df_w0) >= 2 and len(df_w1) >= 2:
+        try:
+            corr_now  = df_w0.corr(method="spearman")
+            corr_prev = df_w1.corr(method="spearman")
+            corr_prev = corr_prev.reindex(index=corr_now.index, columns=corr_now.columns).fillna(0)
+            delta = corr_now - corr_prev
+
+            labels = [c.replace("_close", "").replace("_", " ") for c in delta.columns]
+            fig_delta = go.Figure(go.Heatmap(
+                z=delta.values,
+                x=labels, y=labels,
+                text=delta.round(2).astype(str).values.tolist(),
+                texttemplate="%{text}",
+                colorscale="RdBu_r", zmin=-1, zmax=1,
+                colorbar=dict(title="Δρ"),
+            ))
+            fig_delta.update_layout(
+                title=f"상관관계 주간 변화 (이번 주 - 직전 주)",
+                xaxis=dict(tickangle=-45, tickfont=dict(size=11)),
+                yaxis=dict(tickfont=dict(size=11), autorange="reversed"),
+                margin=dict(l=120, r=40, t=80, b=120),
+            )
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="상관관계 주간 변화 히트맵",
+                chart_html=_fig_to_html(fig_delta),
+            ))
+
+            # Top-5 변화 쌍
+            pairs = []
+            n = len(delta.columns)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    pairs.append((delta.columns[i], delta.columns[j], delta.iloc[i, j]))
+            pairs.sort(key=lambda x: abs(x[2]), reverse=True)
+
+            tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+                   "<tr style='background:#ecf0f1'>"
+                   "<th style='padding:8px 16px'>자산 A</th>"
+                   "<th style='padding:8px 16px'>자산 B</th>"
+                   "<th style='padding:8px 16px;text-align:right'>이번 주 ρ</th>"
+                   "<th style='padding:8px 16px;text-align:right'>직전 주 ρ</th>"
+                   "<th style='padding:8px 16px;text-align:right'>변화 Δρ</th>"
+                   "</tr>")
+            for a, b, d in pairs[:5]:
+                r_now  = round(corr_now.loc[a, b], 3)
+                r_prev = round(corr_prev.loc[a, b], 3)
+                color  = "#e74c3c" if d > 0 else "#2980b9"
+                sign   = "+" if d > 0 else ""
+                la = a.replace("_close", "").replace("_", " ")
+                lb = b.replace("_close", "").replace("_", " ")
+                tbl += (f"<tr>"
+                        f"<td style='padding:8px 16px;font-weight:bold'>{la}</td>"
+                        f"<td style='padding:8px 16px;font-weight:bold'>{lb}</td>"
+                        f"<td style='padding:8px 16px;text-align:right'>{r_now}</td>"
+                        f"<td style='padding:8px 16px;text-align:right'>{r_prev}</td>"
+                        f"<td style='padding:8px 16px;text-align:right;color:{color};font-weight:bold'>"
+                        f"{sign}{round(d, 3)}</td>"
+                        "</tr>")
+            tbl += "</table>"
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="상관관계 변화 Top-5 자산 쌍",
+                chart_html=tbl,
+            ))
+        except Exception as e:
+            log.warning("build_w1_report: 변화량 히트맵 실패: %s", e)
+
+    html = _HTML_TEMPLATE.format(
+        title=f"[W] 자산 간 상관관계 주간 변화 — {ref_date}",
+        generated_at=ref_date,
+        date_range=f"{w1_start.date()} ~ {w0_end.date()}",
+        sections="\n".join(sections) if sections else "<p>데이터 부족으로 히트맵 생성 불가</p>",
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_w1_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_m2_report  (M-2 삼성전자 S-RIM 적정가 & 팩터)
+# ---------------------------------------------------------------------------
+
+def build_m2_report(
+    master: pd.DataFrame,
+    ticker: str = "005930",
+    output_path: str | None = None,
+) -> str:
+    """
+    M-2 S-RIM 적정가 & 팩터 리포트.
+
+    S-RIM (Simplified Residual Income Model):
+      적정가 = BPS × ROE / COE
+      밴드: BPS × ROE / (COE ± 0.02)
+
+    포함 섹션:
+      1. S-RIM 적정가 밴드 vs 현재가 라인 차트
+      2. ROE 추이 라인
+      3. 괴리율 요약 카드
+    """
+    monthly_dir = REPORTS_DIR / "monthly"
+    monthly_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = master.index[-1].strftime("%Y-%m") if not master.empty else str(date.today())[:7]
+    out = Path(output_path) if output_path else monthly_dir / f"m2_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+    COE = 0.10  # Cost of Equity: 10% 가정
+
+    # 필요 컬럼 탐색
+    price_col = f"kr_{ticker}_close"
+    roe_col   = next((c for c in master.columns if ticker in c and "roe" in c.lower()), None)
+    bps_col   = next((c for c in master.columns if ticker in c and "bps" in c.lower()), None)
+
+    # DART 데이터 없으면 master에서 PER/PBR로 근사
+    per_col = next((c for c in master.columns if ticker in c and "per" in c.lower()), None)
+    pbr_col = next((c for c in master.columns if ticker in c and "pbr" in c.lower()), None)
+
+    has_data = (price_col in master.columns) and (roe_col or (per_col and pbr_col))
+
+    if not has_data:
+        log.warning("build_m2_report: %s 재무 데이터 없음 — 안내 메시지 출력", ticker)
+        msg = (
+            "<div style='padding:24px;background:#fff3cd;border-left:4px solid #ffc107;"
+            "border-radius:4px'>"
+            f"<strong>데이터 없음</strong>: {ticker} 재무 데이터(BPS/ROE/PBR)가 master에 없습니다.<br>"
+            "DART API 키 설정 및 수집 실행 후 재시도하세요.<br>"
+            "(<code>collectors/kr/financials.py</code> → <code>get_key_ratios()</code>)"
+            "</div>"
+        )
+        sections.append(_SECTION_TEMPLATE.format(heading="S-RIM 분석", chart_html=msg))
+    else:
+        price_s = master[price_col].dropna()
+
+        # ROE: 직접 컬럼 있으면 사용, 없으면 PBR/PER에서 근사 (ROE ≈ PBR/PER × 순이익 근사는 부정확 — BPS 없으면 스킵)
+        if roe_col:
+            roe_s = master[roe_col].dropna() / 100  # % → 소수
+        elif per_col and pbr_col:
+            # ROE = EPS/BPS = (Price/PER) / (Price/PBR) = PBR/PER
+            roe_s = (master[pbr_col] / master[per_col]).replace([float("inf"), -float("inf")], float("nan")).dropna()
+            log.info("build_m2_report: ROE를 PBR/PER 근사값으로 계산")
+        else:
+            roe_s = pd.Series(dtype=float)
+
+        # BPS: 직접 없으면 price/PBR으로 역산
+        if bps_col:
+            bps_s = master[bps_col].dropna()
+        elif pbr_col and price_col in master.columns:
+            bps_s = (master[price_col] / master[pbr_col]).replace([float("inf"), -float("inf")], float("nan")).dropna()
+            log.info("build_m2_report: BPS를 Price/PBR 역산값으로 계산")
+        else:
+            bps_s = pd.Series(dtype=float)
+
+        if not roe_s.empty and not bps_s.empty:
+            common_idx = price_s.index.intersection(roe_s.index).intersection(bps_s.index)
+            if len(common_idx) >= 2:
+                p  = price_s.reindex(common_idx)
+                r  = roe_s.reindex(common_idx)
+                b  = bps_s.reindex(common_idx)
+
+                fair_base  = b * r / COE
+                fair_upper = b * r / (COE - 0.02)  # COE-2% → 상단
+                fair_lower = b * r / (COE + 0.02)  # COE+2% → 하단
+
+                # 괴리율
+                last_price = p.iloc[-1]
+                last_fair  = fair_base.iloc[-1]
+                gap_pct    = (last_price / last_fair - 1) * 100 if last_fair != 0 else float("nan")
+
+                # ── S-RIM 차트 ────────────────────────────────────────────
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=common_idx, y=p.values,  name="현재가",   line=dict(color="#2c3e50", width=2)))
+                fig.add_trace(go.Scatter(x=common_idx, y=fair_base.values,  name=f"적정가 (COE={COE*100:.0f}%)", line=dict(color="#27ae60", width=2, dash="dash")))
+                fig.add_trace(go.Scatter(x=common_idx, y=fair_upper.values, name="상단 밴드 (COE-2%)", line=dict(color="#e74c3c", width=1, dash="dot")))
+                fig.add_trace(go.Scatter(x=common_idx, y=fair_lower.values, name="하단 밴드 (COE+2%)",
+                                         fill="tonexty", fillcolor="rgba(39,174,96,0.08)",
+                                         line=dict(color="#3498db", width=1, dash="dot")))
+                fig.update_layout(title=f"{ticker} S-RIM 적정가 밴드", xaxis_title="날짜", yaxis_title="가격 (원)", hovermode="x unified")
+                sections.append(_SECTION_TEMPLATE.format(heading="S-RIM 적정가 밴드 vs 현재가", chart_html=_fig_to_html(fig)))
+
+                # ── ROE 추이 ─────────────────────────────────────────────
+                fig_roe = go.Figure(go.Scatter(x=common_idx, y=(r * 100).values, name="ROE (%)", line=dict(color="#8e44ad", width=2)))
+                fig_roe.add_hline(y=COE * 100, line_dash="dash", line_color="#e74c3c", annotation_text=f"COE={COE*100:.0f}%")
+                fig_roe.update_layout(title=f"{ticker} ROE 추이", xaxis_title="날짜", yaxis_title="ROE (%)")
+                sections.append(_SECTION_TEMPLATE.format(heading="ROE 추이", chart_html=_fig_to_html(fig_roe)))
+
+                # ── 괴리율 카드 ───────────────────────────────────────────
+                gap_color = "#e74c3c" if gap_pct > 20 else ("#f39c12" if gap_pct > 0 else "#27ae60")
+                gap_label = "고평가" if gap_pct > 20 else ("소폭 고평가" if gap_pct > 0 else "저평가")
+                card = (
+                    f"<div style='display:flex;gap:24px;flex-wrap:wrap'>"
+                    f"<div style='padding:20px 28px;background:#f8f9fa;border-radius:8px;min-width:160px'>"
+                    f"<div style='font-size:0.85em;color:#7f8c8d'>현재가</div>"
+                    f"<div style='font-size:1.6em;font-weight:bold;color:#2c3e50'>{last_price:,.0f}원</div></div>"
+                    f"<div style='padding:20px 28px;background:#f8f9fa;border-radius:8px;min-width:160px'>"
+                    f"<div style='font-size:0.85em;color:#7f8c8d'>S-RIM 적정가</div>"
+                    f"<div style='font-size:1.6em;font-weight:bold;color:#27ae60'>{last_fair:,.0f}원</div></div>"
+                    f"<div style='padding:20px 28px;background:{gap_color}18;border-radius:8px;border-left:4px solid {gap_color};min-width:160px'>"
+                    f"<div style='font-size:0.85em;color:#7f8c8d'>괴리율</div>"
+                    f"<div style='font-size:1.6em;font-weight:bold;color:{gap_color}'>"
+                    f"{'+'if gap_pct>0 else ''}{gap_pct:.1f}% ({gap_label})</div></div>"
+                    f"</div>"
+                )
+                sections.append(_SECTION_TEMPLATE.format(heading="S-RIM 괴리율 요약", chart_html=card))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"[{ref_date}] {ticker} S-RIM 적정가 & 팩터",
+        generated_at=ref_date,
+        date_range=f"{master.index[0].date() if not master.empty else ''} ~ {master.index[-1].date() if not master.empty else ''}",
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_m2_report: saved to %s", out)
+    return str(out.resolve())
+
+
+# ---------------------------------------------------------------------------
+# build_m4_report  (M-4 동일가중 멀티에셋 백테스팅)
+# ---------------------------------------------------------------------------
+
+_M4_ASSETS = [
+    "us_sp500_close",
+    "kr_kospi_close",
+    "cmd_wti_close",
+    "cmd_gold_close",
+    "rate_us10y_close",
+    "crypto_btc_close",
+]
+_M4_BENCHMARK = "kr_kospi_close"
+
+
+def build_m4_report(
+    master: pd.DataFrame,
+    output_path: str | None = None,
+) -> str:
+    """
+    M-4 동일가중 멀티에셋 백테스팅 성과 리포트.
+
+    포함 섹션:
+      1. 포트폴리오 vs KOSPI 누적 수익률 라인 차트
+      2. 성과 지표 카드 (알파, 샤프, MDD, 연환산 수익률)
+      3. 연도별 수익률 테이블
+    """
+    monthly_dir = REPORTS_DIR / "monthly"
+    monthly_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = master.index[-1].strftime("%Y-%m") if not master.empty else str(date.today())[:7]
+    out = Path(output_path) if output_path else monthly_dir / f"m4_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    sections: list[str] = []
+
+    # 사용 가능한 자산만 선택
+    valid_cols = [c for c in _M4_ASSETS if c in master.columns]
+    if len(valid_cols) < 2:
+        log.warning("build_m4_report: 자산 데이터 부족 (%d개)", len(valid_cols))
+        return _save_empty_report(out, "M-4 백테스팅", ref_date)
+
+    try:
+        from analysis.backtest import run_backtest, calc_returns
+
+        # 항상 전체 보유 신호 (동일가중 buy-and-hold)
+        def all_in_signal(m: pd.DataFrame) -> pd.DataFrame:
+            prices = m[valid_cols].dropna(how="all")
+            return pd.DataFrame(True, index=prices.index, columns=valid_cols)
+
+        result = run_backtest(
+            master=master,
+            price_cols=valid_cols,
+            signal_func=all_in_signal,
+            rebal_freq="ME",
+            transaction_cost=0.001,
+            benchmark_col=_M4_BENCHMARK,
+        )
+
+        cumul      = result["cumulative"]
+        bench_cumul = result["benchmark_cumulative"]
+        metrics    = result["metrics"]
+
+        if cumul.empty:
+            raise ValueError("백테스팅 결과 없음")
+
+        # ── 누적 수익률 차트 ─────────────────────────────────────────────
+        returns_dict: dict[str, pd.Series] = {"멀티에셋 포트폴리오": cumul}
+        if not bench_cumul.empty:
+            returns_dict["KOSPI (벤치마크)"] = bench_cumul
+
+        fig = plot_cumulative_returns(returns_dict, title="멀티에셋 포트폴리오 vs KOSPI 누적 수익률")
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="누적 수익률 비교",
+            chart_html=_fig_to_html(fig),
+        ))
+
+        # ── 성과 지표 카드 ───────────────────────────────────────────────
+        def _pct(v) -> str:
+            return f"{v*100:.1f}%" if v is not None else "N/A"
+
+        def _f(v, fmt=".2f") -> str:
+            return f"{v:{fmt}}" if v is not None else "N/A"
+
+        alpha_color = "#27ae60" if (metrics.get("alpha") or 0) > 0 else "#e74c3c"
+        cards_html = (
+            f"<div style='display:flex;gap:20px;flex-wrap:wrap'>"
+            f"<div style='padding:18px 24px;background:#f8f9fa;border-radius:8px;min-width:140px'>"
+            f"<div style='font-size:0.82em;color:#7f8c8d'>연환산 수익률</div>"
+            f"<div style='font-size:1.5em;font-weight:bold;color:#2c3e50'>{_pct(metrics.get('annualized_return'))}</div></div>"
+            f"<div style='padding:18px 24px;background:#f8f9fa;border-radius:8px;min-width:140px'>"
+            f"<div style='font-size:0.82em;color:#7f8c8d'>샤프 비율</div>"
+            f"<div style='font-size:1.5em;font-weight:bold;color:#2c3e50'>{_f(metrics.get('sharpe_ratio'))}</div></div>"
+            f"<div style='padding:18px 24px;background:#f8f9fa;border-radius:8px;min-width:140px'>"
+            f"<div style='font-size:0.82em;color:#7f8c8d'>최대 낙폭 (MDD)</div>"
+            f"<div style='font-size:1.5em;font-weight:bold;color:#e74c3c'>{_pct(metrics.get('max_drawdown'))}</div></div>"
+            f"<div style='padding:18px 24px;background:{alpha_color}18;border-radius:8px;border-left:4px solid {alpha_color};min-width:140px'>"
+            f"<div style='font-size:0.82em;color:#7f8c8d'>KOSPI 대비 알파</div>"
+            f"<div style='font-size:1.5em;font-weight:bold;color:{alpha_color}'>"
+            f"{'+'if (metrics.get('alpha') or 0)>0 else ''}{_pct(metrics.get('alpha'))}</div></div>"
+            f"</div>"
+        )
+        sections.append(_SECTION_TEMPLATE.format(heading="성과 지표", chart_html=cards_html))
+
+        # ── 연도별 수익률 테이블 ─────────────────────────────────────────
+        port_ret = result["returns"]
+        if not port_ret.empty:
+            annual_port  = (1 + port_ret).resample("YE").prod() - 1
+            if not bench_cumul.empty:
+                bench_ret = bench_cumul.diff().fillna(bench_cumul.iloc[0])
+                annual_bench = (1 + bench_ret).resample("YE").prod() - 1
+            else:
+                annual_bench = pd.Series(dtype=float)
+
+            tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+                   "<tr style='background:#ecf0f1'>"
+                   "<th style='padding:8px 16px'>연도</th>"
+                   "<th style='padding:8px 16px;text-align:right'>포트폴리오</th>"
+                   "<th style='padding:8px 16px;text-align:right'>KOSPI</th>"
+                   "<th style='padding:8px 16px;text-align:right'>초과 수익</th>"
+                   "</tr>")
+            for yr in annual_port.index:
+                yr_str = yr.strftime("%Y")
+                p_val  = annual_port.get(yr, float("nan"))
+                b_val  = annual_bench.get(yr, float("nan")) if not annual_bench.empty else float("nan")
+                excess = (p_val - b_val) if (not pd.isna(p_val) and not pd.isna(b_val)) else float("nan")
+
+                p_color = "#27ae60" if p_val > 0 else "#e74c3c"
+                e_color = "#27ae60" if (not pd.isna(excess) and excess > 0) else "#e74c3c"
+                tbl += (f"<tr>"
+                        f"<td style='padding:8px 16px;font-weight:bold'>{yr_str}</td>"
+                        f"<td style='padding:8px 16px;text-align:right;color:{p_color}'>"
+                        f"{'+'if p_val>0 else ''}{p_val*100:.1f}%</td>"
+                        f"<td style='padding:8px 16px;text-align:right'>"
+                        f"{'N/A' if pd.isna(b_val) else f'{b_val*100:.1f}%'}</td>"
+                        f"<td style='padding:8px 16px;text-align:right;color:{e_color}'>"
+                        f"{'N/A' if pd.isna(excess) else f'{'+'if excess>0 else ''}{excess*100:.1f}%'}</td>"
+                        "</tr>")
+            tbl += "</table>"
+            sections.append(_SECTION_TEMPLATE.format(heading="연도별 수익률", chart_html=tbl))
+
+    except Exception as e:
+        log.error("build_m4_report: 백테스팅 실패: %s", e)
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="백테스팅 오류",
+            chart_html=f"<p style='color:#e74c3c'>백테스팅 실행 중 오류: {e}</p>",
+        ))
+
+    # 편입 자산 목록
+    asset_names = [c.replace("_close", "").replace("_", " ") for c in valid_cols]
+    asset_info = (
+        f"<p style='color:#7f8c8d;font-size:0.9em'>"
+        f"편입 자산 ({len(valid_cols)}개): {', '.join(asset_names)} | "
+        f"리밸런싱: 월말 동일가중 | 거래비용: 0.1% 편도</p>"
+    )
+    sections.insert(0, _SECTION_TEMPLATE.format(heading="백테스팅 조건", chart_html=asset_info))
+
+    html = _HTML_TEMPLATE.format(
+        title=f"[{ref_date}] 동일가중 멀티에셋 백테스팅 성과",
+        generated_at=ref_date,
+        date_range=f"{master.index[0].date() if not master.empty else ''} ~ {master.index[-1].date() if not master.empty else ''}",
+        sections="\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_m4_report: saved to %s", out)
+    return str(out.resolve())
+
+
+def _save_empty_report(out: Path, title: str, ref_date: str) -> str:
+    """데이터 부족 시 빈 리포트를 저장하고 경로를 반환한다."""
+    html = _HTML_TEMPLATE.format(
+        title=title,
+        generated_at=ref_date,
+        date_range=ref_date,
+        sections="<p style='color:#e74c3c'>데이터 부족으로 리포트를 생성할 수 없습니다.</p>",
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    return str(out.resolve())
