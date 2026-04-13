@@ -213,6 +213,16 @@ def main():
     except Exception as e:
         log.warning("reddit sentiment collector failed: %s", e)
 
+    # ── 6-f. Alternative.me F&G + Binance 펀딩비율 (Reddit 대체 감성) ────────
+    try:
+        from collectors.global_.sentiment_alt import get_sentiment_alt_dataset
+        df_sent_alt = get_sentiment_alt_dataset(start=start, end=end, use_cache=use_cache)
+        if not df_sent_alt.empty:
+            frames.append(df_sent_alt)
+            log.info("sentiment alt (F&G+funding): %d rows x %d cols", *df_sent_alt.shape)
+    except Exception as e:
+        log.warning("sentiment alt collector failed: %s", e)
+
     # ── 7. 고래 온체인 (Whale Alert + Glassnode) ────────────────────────────
     try:
         from collectors.global_.whale import get_whale_dataset

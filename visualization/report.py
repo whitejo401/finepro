@@ -837,6 +837,129 @@ def build_d2_report(
         tbl += "</table>"
         sections.append(_SECTION_TEMPLATE.format(heading="금리 현황", chart_html=tbl))
 
+    # ── 4. 공포탐욕지수 게이지 + 30일 추이 ──────────────────────────────────
+    if "sent_fear_greed" in master.columns:
+        fng = master["sent_fear_greed"].dropna()
+        avail_fng = fng.index[fng.index <= pd.Timestamp(ref_date)]
+        if not avail_fng.empty:
+            fng_val = float(fng.loc[avail_fng[-1]])
+            fng_class = ""
+            if "sent_fear_greed_class" in master.columns:
+                cls_s = master["sent_fear_greed_class"].dropna()
+                cls_avail = cls_s.index[cls_s.index <= pd.Timestamp(ref_date)]
+                if not cls_avail.empty:
+                    fng_class = str(cls_s.loc[cls_avail[-1]])
+
+            # 게이지
+            fig_fng = plot_gauge(
+                fng_val,
+                title=f"공포탐욕지수 — {fng_class}",
+                low_label="극도공포",
+                high_label="극도탐욕",
+            )
+            # 30일 추이 라인
+            cutoff_fng = pd.Timestamp(ref_date) - pd.Timedelta(days=30)
+            fng_30 = fng[fng.index >= cutoff_fng]
+            fig_fng_line = go.Figure()
+            if not fng_30.empty:
+                colors_fng = [
+                    "#e74c3c" if v < 25 else
+                    "#e67e22" if v < 45 else
+                    "#f1c40f" if v < 55 else
+                    "#2ecc71" if v < 75 else "#27ae60"
+                    for v in fng_30.values
+                ]
+                fig_fng_line.add_trace(go.Bar(
+                    x=fng_30.index, y=fng_30.values,
+                    marker_color=colors_fng,
+                    name="공포탐욕",
+                    hovertemplate="%{x|%Y-%m-%d}<br>F&G: %{y:.0f}<extra></extra>",
+                ))
+                fig_fng_line.add_hline(y=25, line_dash="dot", line_color="#e74c3c",
+                                       annotation_text="극도공포(25)")
+                fig_fng_line.add_hline(y=75, line_dash="dot", line_color="#2ecc71",
+                                       annotation_text="극도탐욕(75)")
+                fig_fng_line.update_layout(
+                    title="공포탐욕지수 추이 (최근 30일, Alternative.me)",
+                    yaxis=dict(title="F&G 지수", range=[0, 100]),
+                    hovermode="x unified",
+                )
+
+            fng_html = (
+                f"<div style='display:flex;gap:8px;flex-wrap:wrap'>"
+                f"<div style='display:inline-block;width:40%;min-width:220px'>"
+                f"{_fig_to_html(fig_fng)}</div>"
+                f"<div style='display:inline-block;width:58%;min-width:300px'>"
+                f"{_fig_to_html(fig_fng_line)}</div>"
+                f"</div>"
+            )
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="공포탐욕지수 (Alternative.me)",
+                chart_html=fng_html,
+            ))
+
+    # ── 5. Binance 펀딩비율 (파생상품 레버리지 심리) ─────────────────────────
+    fund_cols = [
+        ("deriv_btc_funding_rate", "BTC 펀딩비율 (일평균)"),
+        ("deriv_eth_funding_rate", "ETH 펀딩비율 (일평균)"),
+    ]
+    fund_rows = []
+    for col, label in fund_cols:
+        if col not in master.columns:
+            continue
+        s = master[col].dropna()
+        avail = s.index[s.index <= pd.Timestamp(ref_date)]
+        if avail.empty:
+            continue
+        val = float(s.loc[avail[-1]])
+        ma7 = float(s.loc[avail[-7:]].mean()) if len(avail) >= 7 else val
+        direction = "롱 우세 (강세)" if val > 0 else "숏 우세 (약세)"
+        fund_rows.append((label, f"{val:.5f}%", f"{ma7:.5f}%", direction, avail[-1].strftime("%Y-%m-%d")))
+
+    # 7일 누적 펀딩비율 추가
+    if "deriv_btc_funding_cum7d" in master.columns:
+        s = master["deriv_btc_funding_cum7d"].dropna()
+        avail = s.index[s.index <= pd.Timestamp(ref_date)]
+        if not avail.empty:
+            val = float(s.loc[avail[-1]])
+            direction = "누적 롱 비용" if val > 0 else "누적 숏 비용"
+            fund_rows.append(("BTC 7일 누적 펀딩", f"{val:.5f}%", "—", direction, avail[-1].strftime("%Y-%m-%d")))
+
+    if fund_rows:
+        fund_tbl = (
+            "<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+            "<tr style='background:#ecf0f1'>"
+            "<th style='padding:6px 12px;text-align:left'>지표</th>"
+            "<th style='padding:6px 12px;text-align:right'>최신</th>"
+            "<th style='padding:6px 12px;text-align:right'>7일 평균</th>"
+            "<th style='padding:6px 12px;text-align:right'>방향</th>"
+            "<th style='padding:6px 12px;text-align:right'>기준일</th>"
+            "</tr>"
+        )
+        for i, (lbl, val, ma, direction, dt) in enumerate(fund_rows):
+            bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+            dir_color = "#e74c3c" if "롱" in direction else "#3498db"
+            fund_tbl += (
+                f"<tr style='background:{bg}'>"
+                f"<td style='padding:6px 12px'>{lbl}</td>"
+                f"<td style='padding:6px 12px;text-align:right'>{val}</td>"
+                f"<td style='padding:6px 12px;text-align:right'>{ma}</td>"
+                f"<td style='padding:6px 12px;text-align:right;"
+                f"color:{dir_color};font-weight:bold'>{direction}</td>"
+                f"<td style='padding:6px 12px;text-align:right;color:#999'>{dt}</td>"
+                "</tr>"
+            )
+        fund_tbl += (
+            "</table>"
+            "<p style='color:#888;font-size:0.8em;margin-top:4px'>"
+            "펀딩비율 양수: 롱 포지션이 숏에 수수료 지불 → 롱 과열 신호 가능. "
+            "음수: 숏 과열 신호 가능 (역발상 매수).</p>"
+        )
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="파생상품 펀딩비율 (Binance)",
+            chart_html=fund_tbl,
+        ))
+
     html = _HTML_TEMPLATE.format(
         title=f"연준·금리 감성 스냅샷 — {ref_date}",
         generated_at=ref_date, date_range=ref_date,

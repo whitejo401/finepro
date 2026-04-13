@@ -409,12 +409,92 @@ def _check_regime_shift(master: pd.DataFrame, ref_ts: pd.Timestamp) -> list[Aler
 # 통합 체크 함수
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _check_fear_greed(master: pd.DataFrame, ref_ts: pd.Timestamp) -> list[Alert]:
+    """공포탐욕지수 극단 감지 (Alternative.me)."""
+    alerts: list[Alert] = []
+    if "sent_fear_greed" not in master.columns:
+        return alerts
+    val = _last(master["sent_fear_greed"], ref_ts)
+    if val is None:
+        return alerts
+
+    fng_class = ""
+    if "sent_fear_greed_class" in master.columns:
+        cls_s = master["sent_fear_greed_class"].dropna()
+        avail = cls_s.index[cls_s.index <= ref_ts]
+        if not avail.empty:
+            fng_class = str(cls_s.loc[avail[-1]])
+
+    if val <= 15:
+        alerts.append(Alert(
+            code="FNG_EXTREME_FEAR",
+            severity="critical",
+            title=f"공포탐욕지수 극도 공포 ({val:.0f} — {fng_class})",
+            detail=f"Alternative.me 공포탐욕지수 <b>{val:.0f}</b> — 역사적 저점 구간. 역발상 매수 신호.",
+            col="sent_fear_greed", value=val, threshold=15.0, triggered_at=ref_ts,
+            context="F&G 15 이하: 2020-03 코로나(8), 2022-06 루나(6) 수준. 중기 저점과 일치 경향",
+        ))
+    elif val <= 25:
+        alerts.append(Alert(
+            code="FNG_FEAR",
+            severity="warning",
+            title=f"공포탐욕지수 공포 구간 ({val:.0f} — {fng_class})",
+            detail=f"Alternative.me 공포탐욕지수 <b>{val:.0f}</b> — 과거 단기 반등 발생 구간",
+            col="sent_fear_greed", value=val, threshold=25.0, triggered_at=ref_ts,
+        ))
+    elif val >= 85:
+        alerts.append(Alert(
+            code="FNG_EXTREME_GREED",
+            severity="warning",
+            title=f"공포탐욕지수 극도 탐욕 ({val:.0f} — {fng_class})",
+            detail=f"Alternative.me 공포탐욕지수 <b>{val:.0f}</b> — 과열 구간, 단기 고점 리스크",
+            col="sent_fear_greed", value=val, threshold=85.0, triggered_at=ref_ts,
+            context="F&G 85+ 는 과거 단기 고점과 일치. 포지션 축소 검토 구간",
+        ))
+    return alerts
+
+
+def _check_funding_rate(master: pd.DataFrame, ref_ts: pd.Timestamp) -> list[Alert]:
+    """Binance 펀딩비율 극단 감지 (과열 롱/숏)."""
+    alerts: list[Alert] = []
+    if "deriv_btc_funding_cum7d" not in master.columns:
+        return alerts
+    val = _last(master["deriv_btc_funding_cum7d"], ref_ts)
+    if val is None:
+        return alerts
+
+    s = master["deriv_btc_funding_cum7d"].dropna()
+    pct = _pct_rank(s, val)
+
+    if val > 0 and pct >= 85:
+        alerts.append(Alert(
+            code="FUNDING_EXTREME_LONG",
+            severity="warning",
+            title=f"BTC 선물 롱 과열 (7일 누적 펀딩 {val:+.4f}%, {pct:.0f}%ile)",
+            detail=f"BTC 7일 누적 펀딩비율 <b>{val:+.4f}%</b> — 롱 포지션 과열. 숏 스퀴즈 또는 급락 가능성.",
+            col="deriv_btc_funding_cum7d", value=pct, threshold=85.0, triggered_at=ref_ts,
+            context="롱 과열: 레버리지 청산 리스크. 고점 신호로 활용",
+        ))
+    elif val < 0 and pct <= 15:
+        alerts.append(Alert(
+            code="FUNDING_EXTREME_SHORT",
+            severity="info",
+            title=f"BTC 선물 숏 과열 (7일 누적 펀딩 {val:+.4f}%, {pct:.0f}%ile)",
+            detail=f"BTC 7일 누적 펀딩비율 <b>{val:+.4f}%</b> — 숏 포지션 과열. 숏 커버 랠리 가능성.",
+            col="deriv_btc_funding_cum7d", value=pct, threshold=15.0, triggered_at=ref_ts,
+            context="숏 과열: 역발상 매수 신호. 롱 스퀴즈 랠리 경향",
+        ))
+    return alerts
+
+
 _CHECKERS = [
     _check_asset_move,
     _check_vix,
     _check_yield_curve,
     _check_hy_spread,
     _check_sentiment,
+    _check_fear_greed,
+    _check_funding_rate,
     _check_google_trends,
     _check_cftc_extreme,
     _check_epu,
