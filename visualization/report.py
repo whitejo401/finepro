@@ -291,6 +291,7 @@ _DAILY_MACRO_COLS = [
     ("rate_hy_spread",     "하이일드 스프레드"),
     ("macro_cpi",          "미 CPI"),
     ("macro_unemployment", "미 실업률"),
+    ("kr_macro_apt_price", "서울 아파트 (만원/㎡)"),
 ]
 
 
@@ -444,6 +445,57 @@ def build_daily_report(
             heading="CFTC COT 선물 포지셔닝 (비상업)",
             chart_html=cot_tbl,
         ))
+
+    # ── 4. 서울 아파트 실거래가 추이 ─────────────────────────────────────────
+    if "kr_macro_apt_price" in master.columns:
+        apt = master["kr_macro_apt_price"].dropna()
+        if not apt.empty:
+            fig_apt = go.Figure()
+            fig_apt.add_trace(go.Scatter(
+                x=apt.index, y=apt.values,
+                mode="lines+markers",
+                line=dict(color="#9b59b6", width=2),
+                marker=dict(size=6),
+                name="아파트 실거래가",
+                hovertemplate="%{x|%Y-%m}<br>%{y:,.0f} 만원/㎡<extra></extra>",
+            ))
+            # 6개월 이동평균
+            if len(apt) >= 3:
+                ma6 = apt.rolling(3, min_periods=1).mean()
+                fig_apt.add_trace(go.Scatter(
+                    x=ma6.index, y=ma6.values,
+                    mode="lines",
+                    line=dict(color="#8e44ad", width=1.5, dash="dot"),
+                    name="3개월 MA",
+                ))
+
+            # 변화율 통계 카드
+            val_latest = float(apt.iloc[-1])
+            stats_parts = [f"최신: <b>{val_latest:,.0f} 만원/㎡</b>"]
+            for n_months, label in [(3, "3M"), (6, "6M"), (12, "1Y")]:
+                if len(apt) > n_months:
+                    prev = float(apt.iloc[-1 - n_months])
+                    chg = (val_latest / prev - 1) * 100
+                    color = "#e74c3c" if chg > 0 else "#2ecc71"
+                    stats_parts.append(
+                        f"{label}: <span style='color:{color}'>{chg:+.1f}%</span>"
+                    )
+            stats_html = (
+                "<div style='display:flex;gap:24px;flex-wrap:wrap;"
+                "font-size:0.95em;margin-bottom:8px'>"
+                + "".join(f"<span>{p}</span>" for p in stats_parts)
+                + "</div>"
+            )
+
+            fig_apt.update_layout(
+                title="서울 아파트 실거래가 (국토교통부, 25개구 평균)",
+                yaxis=dict(title="만원/㎡"),
+                hovermode="x unified",
+            )
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="서울 아파트 실거래가",
+                chart_html=stats_html + _fig_to_html(fig_apt),
+            ))
 
     # 현재 국면 헤더 카드
     regime_card = ""
