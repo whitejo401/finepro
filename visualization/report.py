@@ -2083,6 +2083,86 @@ def build_d6_report(
     except Exception as e:
         log.warning("build_d6_report: ETF 테이블 실패: %s", e)
 
+    # ── BTC 온체인 네트워크 지표 ──────────────────────────────────────────────
+    _ONCHAIN_COLS = [
+        ("btc_onchain_tx_count",    "일별 트랜잭션 수",      "{:,.0f}"),
+        ("btc_onchain_volume_usd",  "온체인 볼륨 (USD)",     "${:,.0f}"),
+        ("btc_hashrate",            "해시레이트",            "{:,.0f} TH/s"),
+        ("btc_miners_revenue_usd",  "채굴자 수입 (USD)",     "${:,.0f}"),
+        ("btc_active_addresses",    "활성 주소 수",          "{:,.0f}"),
+    ]
+    onchain_rows = []
+    ref_ts_oc = pd.Timestamp(ref_date)
+    for col, label, fmt in _ONCHAIN_COLS:
+        if col not in master.columns:
+            continue
+        s = master[col].dropna()
+        avail = s.index[s.index <= ref_ts_oc]
+        if avail.empty:
+            continue
+        val = float(s.loc[avail[-1]])
+        prev30 = s.index[s.index <= ref_ts_oc - pd.Timedelta(days=30)]
+        if not prev30.empty:
+            v30 = float(s.loc[prev30[-1]])
+            chg30 = f"{(val/v30-1)*100:+.1f}%" if v30 != 0 else "—"
+        else:
+            chg30 = "—"
+        try:
+            val_str = fmt.format(val)
+        except Exception:
+            val_str = f"{val:,.0f}"
+        onchain_rows.append((label, val_str, chg30, avail[-1].strftime("%Y-%m-%d")))
+
+    if onchain_rows:
+        oc_tbl = (
+            "<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+            "<tr style='background:#ecf0f1'>"
+            "<th style='padding:6px 12px;text-align:left'>지표</th>"
+            "<th style='padding:6px 12px;text-align:right'>현재값</th>"
+            "<th style='padding:6px 12px;text-align:right'>30일 대비</th>"
+            "<th style='padding:6px 12px;text-align:right'>기준일</th>"
+            "</tr>"
+        )
+        for i, (lbl, val, chg, dt) in enumerate(onchain_rows):
+            bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+            oc_tbl += (
+                f"<tr style='background:{bg}'>"
+                f"<td style='padding:6px 12px'>{lbl}</td>"
+                f"<td style='padding:6px 12px;text-align:right'>{val}</td>"
+                f"<td style='padding:6px 12px;text-align:right'>{chg}</td>"
+                f"<td style='padding:6px 12px;text-align:right;color:#999'>{dt}</td>"
+                "</tr>"
+            )
+        oc_tbl += "</table>"
+
+        # 온체인 볼륨 30일 라인차트
+        oc_chart = ""
+        if "btc_onchain_volume_usd" in master.columns:
+            cutoff_oc = ref_ts_oc - pd.Timedelta(days=90)
+            s_vol = master["btc_onchain_volume_usd"].dropna()
+            s_vol = s_vol[s_vol.index >= cutoff_oc]
+            if not s_vol.empty:
+                fig_oc = go.Figure()
+                fig_oc.add_trace(go.Scatter(
+                    x=s_vol.index, y=s_vol.values,
+                    mode="lines", fill="tozeroy",
+                    line=dict(color="#e67e22", width=1.5),
+                    fillcolor="rgba(230,126,34,0.15)",
+                    name="온체인 볼륨",
+                    hovertemplate="%{x|%Y-%m-%d}<br>$%{y:,.0f}<extra></extra>",
+                ))
+                fig_oc.update_layout(
+                    title="BTC 온체인 트랜잭션 볼륨 (최근 90일, blockchain.info)",
+                    yaxis=dict(title="USD"),
+                    hovermode="x unified",
+                )
+                oc_chart = _fig_to_html(fig_oc)
+
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="BTC 온체인 네트워크 지표 (blockchain.info)",
+            chart_html=oc_tbl + oc_chart,
+        ))
+
     html = _HTML_TEMPLATE.format(
         title=f"암호화폐 고래·기관 스냅샷 — {ref_date}",
         generated_at=ref_date, date_range=ref_date,

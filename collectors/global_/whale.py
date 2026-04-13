@@ -4,16 +4,23 @@ collectors/global_/whale.py
 암호화폐 고래(대형 거래) 온체인 데이터 수집.
 
 데이터 소스 (모두 무료, API 키 불필요):
-  1. Blockchair API    — BTC/ETH 대형 트랜잭션 필터 (≥100만 USD), 키 불필요, 1440 req/일
-  2. Mempool.space API — Bitcoin 최근 블록 대형 트랜잭션, 키 불필요, 제한 없음
+  1. api.blockchain.info — BTC 일별 네트워크 통계 (트랜잭션 수/볼륨/해시레이트 등)
+  2. Blockchair API      — BTC/ETH 대형 트랜잭션 필터 (≥100만 USD) ※IP 제한 시 스킵
+  3. Mempool.space API   — Bitcoin 최근 블록 대형 트랜잭션, 키 불필요, 제한 없음
 
 ※ Whale Alert    → 유료 전용 정책으로 제거 (2024년 이후 무료 플랜 폐지)
 ※ CryptoQuant    → 무료 플랜은 price-ohlcv 만 제공, exchange-flows 는 유료 전용
+※ blockchain.info(구 차트 URL) → HTML 반환으로 폐기. api.blockchain.info 사용.
 
 출력 컬럼 (master 병합용):
-  whale_alert_count           : 당일 ≥min_usd 대형 이동 건수
-  whale_alert_volume_usd      : 당일 총 이동 금액 (백만 USD)
-  whale_consolidation_ratio   : 통합 트랜잭션 비율 (input > output → 거래소 유입 추정)
+  btc_onchain_tx_count      : 일별 확인된 트랜잭션 수 (온체인 활동 지표)
+  btc_onchain_volume_usd    : 추정 온체인 거래량 USD (고래 이동 프록시)
+  btc_hashrate              : 해시레이트 (네트워크 안전성)
+  btc_miners_revenue_usd    : 채굴자 수입 USD (채굴자 매도 압력 지표)
+  btc_active_addresses      : 일별 활성 주소 수 (네트워크 참여도)
+  whale_alert_count         : (Blockchair) 당일 ≥min_usd 대형 이동 건수
+  whale_alert_volume_usd    : (Blockchair) 당일 총 이동 금액 (백만 USD)
+  whale_consolidation_ratio : (Blockchair) 통합 트랜잭션 비율
 """
 from __future__ import annotations
 
@@ -347,6 +354,118 @@ def get_mempool_large_txs(
 
 
 # ---------------------------------------------------------------------------
+# api.blockchain.info — BTC 일별 네트워크 통계 (키 불필요)
+# ---------------------------------------------------------------------------
+
+_BLOCKCHAIN_INFO_BASE = "https://api.blockchain.info/charts"
+
+_BCI_CHARTS = [
+    ("n-transactions",                "btc_onchain_tx_count",    "일별 확인 트랜잭션 수"),
+    ("estimated-transaction-volume-usd", "btc_onchain_volume_usd", "추정 온체인 볼륨 USD"),
+    ("hash-rate",                     "btc_hashrate",            "해시레이트 (EH/s 환산)"),
+    ("miners-revenue",                "btc_miners_revenue_usd",  "채굴자 수입 USD"),
+    ("n-unique-addresses",            "btc_active_addresses",    "일별 활성 주소"),
+]
+
+
+def get_blockchain_info_dataset(
+    start: str,
+    end: str | None = None,
+    use_cache: bool = True,
+) -> pd.DataFrame:
+    """
+    api.blockchain.info Charts API로 BTC 일별 온체인 지표를 수집한다.
+
+    키 불필요. 일별 집계 데이터. Blockchair IP 제한 시 주요 대안.
+
+    Args:
+        start    : 시작일 'YYYY-MM-DD'
+        end      : 종료일 'YYYY-MM-DD', None이면 오늘
+
+    Returns:
+        DatetimeIndex DataFrame:
+          btc_onchain_tx_count, btc_onchain_volume_usd, btc_hashrate,
+          btc_miners_revenue_usd, btc_active_addresses
+    """
+    end = end or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    ck = _cache_key("blockchain_info", start, end)
+
+    if use_cache:
+        cached = _load_cache(ck)
+        if cached:
+            try:
+                df = pd.DataFrame(cached)
+                df.index = pd.to_datetime(df.index)
+                df.index.name = "date"
+                log.info("cache hit: blockchain_info_%s_%s", start, end)
+                return df
+            except Exception:
+                pass
+
+    start_ts = pd.Timestamp(start)
+    end_ts   = pd.Timestamp(end)
+    days     = (end_ts - start_ts).days + 30  # 여유분
+
+    # timespan 파라미터: api.blockchain.info는 Ndays/Nweeks/Nmonths/Nyears 형식
+    if days <= 60:
+        timespan = f"{days}days"
+    elif days <= 730:
+        timespan = f"{max(1, days // 30)}months"
+    else:
+        timespan = f"{max(1, days // 365)}years"
+
+    frames: list[pd.DataFrame] = []
+    for chart_id, col_name, desc in _BCI_CHARTS:
+        url = f"{_BLOCKCHAIN_INFO_BASE}/{chart_id}"
+        params = {"timespan": timespan, "format": "json", "sampled": "false"}
+        try:
+            resp = requests.get(url, params=params, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            log.warning("blockchain.info [%s] 실패: %s", chart_id, e)
+            continue
+
+        values = data.get("values", [])
+        if not values:
+            log.warning("blockchain.info [%s]: 빈 응답", chart_id)
+            continue
+
+        rows = []
+        for pt in values:
+            ts  = datetime.fromtimestamp(pt["x"], tz=timezone.utc).replace(tzinfo=None)
+            val = pt.get("y")
+            if val is not None:
+                rows.append({"date": ts, col_name: float(val)})
+
+        if not rows:
+            continue
+
+        sub = pd.DataFrame(rows).set_index("date")
+        sub.index = pd.to_datetime(sub.index).normalize()
+        sub.index.name = "date"
+        sub = sub.loc[start:end]
+        if not sub.empty:
+            frames.append(sub)
+            log.info("blockchain.info %s: %d행", col_name, len(sub))
+
+    if not frames:
+        log.warning("get_blockchain_info_dataset: 수집된 데이터 없음")
+        return pd.DataFrame()
+
+    result = frames[0]
+    for df in frames[1:]:
+        result = result.join(df, how="outer")
+    result.sort_index(inplace=True)
+
+    if use_cache:
+        _save_cache(ck, result.to_dict("list"))
+
+    log.info("blockchain.info 온체인 데이터: %d행 × %d컬럼", *result.shape)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # CoinGecko 거래소 BTC 보유량
 # ---------------------------------------------------------------------------
 
@@ -417,24 +536,36 @@ def get_whale_dataset(
     use_cache: bool = True,
 ) -> pd.DataFrame:
     """
-    고래 데이터 통합 수집 — master DataFrame 병합용.
+    온체인·고래 데이터 통합 수집 — master DataFrame 병합용.
 
-    Blockchair 대형 트랜잭션 + CryptoQuant 거래소 유입/유출을 합쳐 일별 집계 반환.
+    우선순위:
+      1. api.blockchain.info — BTC 일별 네트워크 통계 (주요 소스, 키 불필요)
+      2. Blockchair          — 대형 트랜잭션 집계 (IP 제한 없을 때 보완)
 
     Returns:
-        DataFrame (index=날짜, columns: whale_* 접두사)
+        DataFrame (index=날짜, columns: btc_onchain_*/whale_* 접두사)
     """
     frames: list[pd.DataFrame] = []
 
-    # Blockchair 대형 트랜잭션 집계 (키 불필요)
-    raw_blockchair = get_large_transactions_blockchair(start, end, use_cache=use_cache)
-    if not raw_blockchair.empty:
-        agg = aggregate_large_transactions(raw_blockchair)
-        if not agg.empty:
-            frames.append(agg)
+    # ── 1. api.blockchain.info 온체인 통계 (주 소스) ─────────────────────────
+    df_bci = get_blockchain_info_dataset(start, end, use_cache=use_cache)
+    if not df_bci.empty:
+        frames.append(df_bci)
+    else:
+        log.warning("get_whale_dataset: blockchain.info 수집 실패")
+
+    # ── 2. Blockchair 대형 트랜잭션 (보조 소스, IP 제한 시 스킵) ─────────────
+    try:
+        raw_blockchair = get_large_transactions_blockchair(start, end, use_cache=use_cache)
+        if not raw_blockchair.empty:
+            agg = aggregate_large_transactions(raw_blockchair)
+            if not agg.empty:
+                frames.append(agg)
+    except Exception as e:
+        log.warning("get_whale_dataset: Blockchair 스킵 (%s)", e)
 
     if not frames:
-        log.warning("get_whale_dataset: 수집된 고래 데이터 없음")
+        log.warning("get_whale_dataset: 수집된 온체인 데이터 없음")
         return pd.DataFrame()
 
     from processors.merger import merge_dataframes
