@@ -505,11 +505,13 @@ def get_oecd_cli_dataset(
             log.info("cache hit: %s", cache_key)
             return cached
 
-    # 요청 범위에 맞는 lastNObservations 계산 (OECD v2는 start/end 파라미터 미지원)
+    # OECD CLI는 발간 지연이 최대 15개월이므로 요청 범위에 지연분을 더해 계산한다.
+    # OECD v2 API는 start/end 파라미터를 미지원 → lastNObservations 사용
+    _CLI_LAG_MONTHS = 18  # 발간 지연 여유분
     months = (
         (pd.Timestamp(end).year - pd.Timestamp(start).year) * 12
         + (pd.Timestamp(end).month - pd.Timestamp(start).month)
-        + 3  # 여유분
+        + _CLI_LAG_MONTHS
     )
 
     # OECD SDMX v2 API: DSD_STES@DF_CLI v4.0
@@ -520,7 +522,7 @@ def get_oecd_cli_dataset(
         "OECD.SDD.STES/DSD_STES@DF_CLI/4.0/*"
     )
     qs = (
-        f"lastNObservations={max(months, 24)}"
+        f"lastNObservations={max(months, 60)}"
         "&format=csvfilewithlabels"
         "&dimensionAtObservation=TIME_PERIOD"
     )
@@ -586,7 +588,8 @@ def get_oecd_cli_dataset(
         )
         sub.index.name = "date"
         sub.sort_index(inplace=True)
-        sub = sub.loc[start:end]
+        # CLI 발간 지연(최대 15개월)을 감안해 start 필터 미적용; end만 적용
+        sub = sub.loc[:end]
         frames.append(sub)
         log.info("OECD CLI %s (%s): %d 행", country_code, col_name, len(sub))
 
