@@ -43,6 +43,11 @@ fine/
 ├── notebooks/
 ├── tests/
 ├── config.py                   # 전역 설정 (경로, 기본값)
+├── scheduler/
+│   ├── run_daily.bat           # Windows 일간 실행 배치
+│   └── setup_task.py           # Windows Task Scheduler 등록
+├── .github/workflows/
+│   └── daily_pipeline.yml      # GitHub Actions 일간 자동화
 ├── main.py                     # 파이프라인 실행 진입점
 ├── requirements.txt
 └── .env
@@ -186,10 +191,10 @@ data/processed/
 | 중 | `collectors/global_/whale.py` 신규 | 신규 | Whale Alert + Glassnode 고래 온체인 | ✅ |
 | 중 | `collectors/global_/institutions.py` 신규 | 신규 | CoinGecko 기업 BTC, ETF, SEC 13F | ✅ |
 | 중 | `analysis/crypto_intel.py` 신규 | 신규 | 고래 신호, ETF 분석, 기관 축적/분산 | ✅ |
-| 중 | `collectors/kr/stock.py` — 수급 추가 | 수정 | pykrx 외인·기관 순매수 | ⬜ |
-| 중 | `collectors/global_/market.py` — 섹터 ETF 추가 | 수정 | XLK/XLE/XLF/XLV/XLI | ⬜ |
-| 중 | `processors/merger.py` — KOSPI 갭 컬럼 | 수정 | kr_kospi_gap = open(T+1)/close(T)-1 | ⬜ |
-| 하 | `analysis/regime.py` — `regime_transition_matrix()` | 추가 | 국면 천이 확률 행렬 | ⬜ |
+| 중 | `collectors/kr/stock.py` — 수급 추가 | 수정 | pykrx 외인·기관 순매수 | ✅ |
+| 중 | `collectors/global_/market.py` — 섹터 ETF 추가 | 수정 | XLK/XLE/XLF/XLV/XLI | ✅ |
+| 중 | `processors/merger.py` — KOSPI 갭 컬럼 | 수정 | kr_kospi_gap = open(T+1)/close(T)-1 | ✅ |
+| 하 | `analysis/regime.py` — `regime_transition_matrix()` | 추가 | 국면 천이 확률 행렬 | ✅ |
 
 ---
 
@@ -203,14 +208,17 @@ Phase 4 (sentiment.py + fear_greed.py): M-5, M-6                      ✅ 완료
 Phase 5 (blog_formatter.py): 블로그 플랫폼 자동 변환·배포               ✅ 완료
 Phase 6 (whale.py + institutions.py + crypto_intel.py): D-6, W-6      ✅ 완료
 Phase 7 (미구현 리포트): W-1, M-2, M-4                                 ✅ 완료
+Phase 8 (데이터 소스 확장): EIA, World Bank, pytrends, GDELT, EPU, CFTC, kr/macro.py ✅ 완료
+Phase 9 (마무리): OECD CLI, CBOE P/C(FRED CPCE), ccxt→main.py, 자동화 스케줄러     ✅ 완료
+Phase 10 (Reddit 감성): praw get_reddit_sentiment(), vaderSentiment, main.py 6-e     ✅ 완료
 ```
 
 ### 신규 API 키 필요 (Phase 6)
 
 | 키 | 서비스 | 상태 |
 |----|--------|------|
-| `CRYPTOQUANT_API_KEY` | https://cryptoquant.com | 미발급 |
-| `ECOS_API_KEY` | 한국은행 | 심사 중 |
+| `CRYPTOQUANT_API_KEY` | https://cryptoquant.com | 무료 플랜 price-ohlcv만 지원 → 미사용 |
+| `ECOS_API_KEY` | 한국은행 | 심사 중 (수집기 준비 완료) |
 | `REDDIT_CLIENT_ID/SECRET` | Reddit | 심사 중 |
 
 > Whale Alert → 무료 플랜 폐지로 제거. Blockchair/Mempool.space(키 불필요)로 대체.

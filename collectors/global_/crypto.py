@@ -1,16 +1,18 @@
 """
-암호화폐 데이터 수집기 (CoinGecko Demo API).
+암호화폐 데이터 수집기.
 
-수집 항목:
-  - BTC/ETH 일별 종가 (USD)
-  - 전체 암호화폐 시가총액
-  - BTC 도미넌스 (%)
+수집 소스:
+  - CoinGecko Demo API: BTC/ETH 일별 종가, 시총, 도미넌스 (키 필요, 최근 365일)
+  - ccxt: Binance/Upbit 공개 OHLCV (키 불필요, 무제한 히스토리)
 
 컬럼명 규칙: crypto_ 접두사
-  crypto_btc_close, crypto_eth_close,
-  crypto_total_mcap, crypto_btc_dominance
+  crypto_btc_close, crypto_eth_close          # CoinGecko or ccxt
+  crypto_total_mcap, crypto_btc_dominance     # CoinGecko
+  crypto_btc_krw, crypto_eth_krw              # ccxt Upbit (원화)
+  crypto_btc_volume, crypto_eth_volume        # ccxt Binance 거래량
 
-COINGECKO_API_KEY 없으면 빈 DataFrame 반환.
+COINGECKO_API_KEY 없으면 CoinGecko 섹션 빈 DataFrame 반환.
+ccxt는 키 불필요.
 """
 from __future__ import annotations
 
@@ -272,3 +274,131 @@ def get_crypto_dataset(
         save_cache(cache_key, df)
 
     return df
+
+
+# ---------------------------------------------------------------------------
+# ccxt — 거래소 공개 OHLCV (키 불필요)
+# ---------------------------------------------------------------------------
+
+# (exchange_id, symbol, col_suffix)
+_CCXT_PAIRS: list[tuple[str, str, str]] = [
+    ("binance", "BTC/USDT", "btc"),    # BTC/USDT 일별 OHLCV
+    ("binance", "ETH/USDT", "eth"),    # ETH/USDT 일별 OHLCV
+    ("upbit",   "BTC/KRW",  "btc_krw"), # BTC 원화 (업비트)
+]
+
+_CCXT_MAX_FETCH = 500  # 회당 최대 캔들 수
+
+
+def _fetch_ccxt_ohlcv(
+    exchange_id: str,
+    symbol: str,
+    col_suffix: str,
+    start: str,
+    end: str,
+) -> pd.DataFrame:
+    """ccxt 거래소에서 일별 OHLCV를 수집한다."""
+    try:
+        import ccxt as _ccxt  # type: ignore
+        exchange_cls = getattr(_ccxt, exchange_id)
+        exchange = exchange_cls({"enableRateLimit": True})
+    except (ImportError, AttributeError) as e:
+        log.warning("ccxt %s 초기화 실패: %s", exchange_id, e)
+        return pd.DataFrame()
+
+    start_ms = int(pd.Timestamp(start).timestamp() * 1000)
+    end_ms   = int(pd.Timestamp(end).timestamp() * 1000)
+
+    all_bars: list[list] = []
+    since = start_ms
+
+    while since < end_ms:
+        try:
+            bars = exchange.fetch_ohlcv(symbol, timeframe="1d", since=since, limit=_CCXT_MAX_FETCH)
+        except Exception as e:
+            log.warning("ccxt %s %s OHLCV 오류: %s", exchange_id, symbol, e)
+            break
+        if not bars:
+            break
+        # 종료일 이후 제거
+        bars = [b for b in bars if b[0] <= end_ms]
+        all_bars.extend(bars)
+        if len(bars) < _CCXT_MAX_FETCH:
+            break
+        since = bars[-1][0] + 86_400_000  # 다음 날
+        time.sleep(0.3)
+
+    if not all_bars:
+        return pd.DataFrame()
+
+    records = []
+    for bar in all_bars:
+        ts, o, h, l, c, v = bar[:6]
+        date = pd.Timestamp(ts, unit="ms").normalize()
+        records.append({"date": date, f"crypto_{col_suffix}_close": float(c),
+                         f"crypto_{col_suffix}_volume": float(v)})
+
+    df = pd.DataFrame(records).drop_duplicates("date").set_index("date")
+    df.index = pd.DatetimeIndex(df.index)
+    df.index.name = "date"
+    df.sort_index(inplace=True)
+    return df
+
+
+def get_ccxt_dataset(
+    start: str,
+    end: str | None = None,
+    use_cache: bool = True,
+) -> pd.DataFrame:
+    """
+    ccxt 거래소 공개 API로 BTC/ETH OHLCV 수집.
+
+    키 불필요. Binance(USD), Upbit(KRW) 동시 수집.
+
+    Returns:
+        DatetimeIndex DataFrame:
+          crypto_btc_close/volume    (Binance USD)
+          crypto_eth_close/volume    (Binance USD)
+          crypto_btc_krw_close/volume (Upbit KRW)
+    """
+    end = end or pd.Timestamp.today().strftime("%Y-%m-%d")
+    cache_key = f"ccxt_{start}_{end}"
+
+    if use_cache:
+        cached = load_cache(cache_key)
+        if cached is not None:
+            log.info("cache hit: %s", cache_key)
+            return cached
+
+    try:
+        import ccxt  # noqa: F401
+    except ImportError:
+        log.warning("ccxt 패키지 없음 — pip install ccxt")
+        return pd.DataFrame()
+
+    frames: list[pd.DataFrame] = []
+    for exchange_id, symbol, col_suffix in _CCXT_PAIRS:
+        log.info("ccxt fetch: %s %s (%s ~ %s)", exchange_id, symbol, start, end)
+        df = _fetch_ccxt_ohlcv(exchange_id, symbol, col_suffix, start, end)
+        if not df.empty:
+            frames.append(df)
+            log.info("ccxt %s %s: %d 행", exchange_id, symbol, len(df))
+        time.sleep(0.5)
+
+    if not frames:
+        return pd.DataFrame()
+
+    result = frames[0]
+    for df in frames[1:]:
+        # close 컬럼 중복 시 _dup suffix
+        overlap = set(result.columns) & set(df.columns)
+        if overlap:
+            df = df.rename(columns={c: f"{c}_dup" for c in overlap})
+        result = result.join(df, how="outer")
+    result.sort_index(inplace=True)
+
+    if use_cache:
+        save_cache(cache_key, result)
+
+    log.info("ccxt dataset: %d 컬럼, %d 행", len(result.columns), len(result))
+    return result

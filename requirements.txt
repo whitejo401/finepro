@@ -32,6 +32,7 @@ seaborn>=0.13.0
 # 뉴스/대체 데이터
 newsapi-python>=0.2.7
 praw>=7.7.1
+vaderSentiment>=3.3.2
 pytrends>=4.9.2
 requests>=2.32.0
 

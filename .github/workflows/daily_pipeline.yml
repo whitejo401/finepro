@@ -1,0 +1,51 @@
+name: Daily Financial Data Pipeline
+
+on:
+  schedule:
+    # 매일 UTC 22:00 (KST 07:00)
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Report mode"
+        required: false
+        default: "daily"
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          ECOS_API_KEY: ${{ secrets.ECOS_API_KEY }}
+          DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
+          MOLIT_API_KEY: ${{ secrets.MOLIT_API_KEY }}
+        run: |
+          python main.py --mode ${{ github.event.inputs.mode || 'daily' }}
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ github.run_id }}
+          path: reports/
+          retention-days: 30

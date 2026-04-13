@@ -350,9 +350,13 @@ def build_daily_report(
             continue
         latest_ts = avail[-1]
         val = s.loc[latest_ts]
+        if isinstance(val, pd.Series):
+            val = val.iloc[-1]
         prev_avail = s.index[s.index < latest_ts]
         if not prev_avail.empty:
             prev_val = s.loc[prev_avail[-1]]
+            if isinstance(prev_val, pd.Series):
+                prev_val = prev_val.iloc[-1]
             chg = val - prev_val
             chg_str = f"{chg:+.3f}"
         else:

@@ -73,7 +73,7 @@ def main():
     except Exception as e:
         log.warning("kr market net buying collector failed: %s", e)
 
-    # ── 3. 미국 거시 (FRED + EIA) ────────────────────────────────────────────
+    # ── 3. 미국 거시 (FRED) ──────────────────────────────────────────────────
     try:
         from collectors.global_.macro import get_macro_dataset
         df_macro = get_macro_dataset(start=start, end=end, use_cache=use_cache)
@@ -82,6 +82,55 @@ def main():
             log.info("macro: %d rows x %d cols", *df_macro.shape)
     except Exception as e:
         log.warning("macro collector failed: %s", e)
+
+    # ── 3-b. EIA (원유재고·생산량·천연가스) ──────────────────────────────────
+    try:
+        from collectors.global_.macro import get_eia_dataset
+        df_eia = get_eia_dataset(start=start, end=end, use_cache=use_cache)
+        if not df_eia.empty:
+            frames.append(df_eia)
+            log.info("eia: %d rows x %d cols", *df_eia.shape)
+    except Exception as e:
+        log.warning("eia collector failed: %s", e)
+
+    # ── 3-c. World Bank (주요국 GDP·CPI·경상수지) ────────────────────────────
+    try:
+        from collectors.global_.macro import get_worldbank_dataset
+        df_wb = get_worldbank_dataset(start=start, end=end, use_cache=use_cache)
+        if not df_wb.empty:
+            frames.append(df_wb)
+            log.info("worldbank: %d rows x %d cols", *df_wb.shape)
+    except Exception as e:
+        log.warning("worldbank collector failed: %s", e)
+
+    # ── 3-e. OECD 경기선행지수 (CLI) ────────────────────────────────────────
+    try:
+        from collectors.global_.macro import get_oecd_cli_dataset
+        df_oecd = get_oecd_cli_dataset(start=start, end=end, use_cache=use_cache)
+        if not df_oecd.empty:
+            frames.append(df_oecd)
+            log.info("oecd cli: %d rows x %d cols", *df_oecd.shape)
+    except Exception as e:
+        log.warning("oecd cli collector failed: %s", e)
+
+    # ── 3-d. 국내 거시 (ECOS + 국토부 아파트) ───────────────────────────────
+    try:
+        from collectors.kr.macro import get_ecos_dataset
+        df_ecos = get_ecos_dataset(start=start, end=end, use_cache=use_cache)
+        if not df_ecos.empty:
+            frames.append(df_ecos)
+            log.info("ecos: %d rows x %d cols", *df_ecos.shape)
+    except Exception as e:
+        log.warning("ecos collector failed: %s", e)
+
+    try:
+        from collectors.kr.macro import get_molit_apt_price
+        df_molit = get_molit_apt_price(start=start, end=end, use_cache=use_cache)
+        if not df_molit.empty:
+            frames.append(df_molit)
+            log.info("molit apt: %d rows x %d cols", *df_molit.shape)
+    except Exception as e:
+        log.warning("molit collector failed: %s", e)
 
     # ── 4. 국내 재무 (DART) ─────────────────────────────────────────────────
     try:
@@ -104,6 +153,16 @@ def main():
     except Exception as e:
         log.warning("crypto collector failed: %s", e)
 
+    # ── 5-b. 암호화폐 ccxt (Binance/Upbit 공개 OHLCV) ───────────────────────
+    try:
+        from collectors.global_.crypto import get_ccxt_dataset
+        df_ccxt = get_ccxt_dataset(start=start, end=end, use_cache=use_cache)
+        if not df_ccxt.empty:
+            frames.append(df_ccxt)
+            log.info("ccxt: %d rows x %d cols", *df_ccxt.shape)
+    except Exception as e:
+        log.warning("ccxt collector failed: %s", e)
+
     # ── 6. 뉴스 감성 (NewsAPI) ───────────────────────────────────────────────
     try:
         from collectors.global_.alt import get_news_sentiment
@@ -114,6 +173,46 @@ def main():
     except Exception as e:
         log.warning("news sentiment collector failed: %s", e)
 
+    # ── 6-b. Google Trends ───────────────────────────────────────────────────
+    try:
+        from collectors.global_.alt import get_trends_dataset
+        df_trends = get_trends_dataset(start=start, end=end, use_cache=use_cache)
+        if not df_trends.empty:
+            frames.append(df_trends)
+            log.info("google trends: %d rows x %d cols", *df_trends.shape)
+    except Exception as e:
+        log.warning("google trends collector failed: %s", e)
+
+    # ── 6-c. GDELT 지정학 이벤트 ─────────────────────────────────────────────
+    try:
+        from collectors.global_.alt import get_gdelt_tone
+        df_gdelt = get_gdelt_tone(start=start, end=end, use_cache=use_cache)
+        if not df_gdelt.empty:
+            frames.append(df_gdelt)
+            log.info("gdelt: %d rows x %d cols", *df_gdelt.shape)
+    except Exception as e:
+        log.warning("gdelt collector failed: %s", e)
+
+    # ── 6-d. EPU 경제정책 불확실성 지수 ─────────────────────────────────────
+    try:
+        from collectors.global_.alt import get_epu_index
+        df_epu = get_epu_index(start=start, end=end, use_cache=use_cache)
+        if not df_epu.empty:
+            frames.append(df_epu)
+            log.info("epu: %d rows x %d cols", *df_epu.shape)
+    except Exception as e:
+        log.warning("epu collector failed: %s", e)
+
+    # ── 6-e. Reddit 커뮤니티 감성 (praw) ────────────────────────────────────
+    try:
+        from collectors.global_.alt import get_reddit_sentiment
+        df_reddit = get_reddit_sentiment(start=start, end=end, use_cache=use_cache)
+        if not df_reddit.empty:
+            frames.append(df_reddit)
+            log.info("reddit sentiment: %d rows x %d cols", *df_reddit.shape)
+    except Exception as e:
+        log.warning("reddit sentiment collector failed: %s", e)
+
     # ── 7. 고래 온체인 (Whale Alert + Glassnode) ────────────────────────────
     try:
         from collectors.global_.whale import get_whale_dataset
@@ -123,6 +222,16 @@ def main():
             log.info("whale data: %d rows x %d cols", *df_whale.shape)
     except Exception as e:
         log.warning("whale collector failed: %s", e)
+
+    # ── 7-b. CFTC COT 선물 포지셔닝 ────────────────────────────────────────
+    try:
+        from collectors.global_.cftc import get_cftc_cot
+        df_cot = get_cftc_cot(start=start, end=end, use_cache=use_cache)
+        if not df_cot.empty:
+            frames.append(df_cot)
+            log.info("cftc cot: %d rows x %d cols", *df_cot.shape)
+    except Exception as e:
+        log.warning("cftc cot collector failed: %s", e)
 
     # ── 8. 비트코인 ETF (yfinance) ─────────────────────────────────────────
     try:
