@@ -283,13 +283,14 @@ def build_report(
 # ---------------------------------------------------------------------------
 
 _DAILY_MACRO_COLS = [
-    ("rate_fed",          "연준 기준금리"),
-    ("rate_us10y",        "미 10년 금리"),
-    ("rate_us2y",         "미 2년 금리"),
-    ("rate_spread_10_2",  "10-2년 스프레드"),
-    ("rate_hy_spread",    "하이일드 스프레드"),
-    ("macro_cpi",         "미 CPI"),
-    ("macro_unemployment","미 실업률"),
+    ("rate_fed",           "연준 기준금리"),
+    ("kr_macro_base_rate", "한국 기준금리"),
+    ("rate_us10y",         "미 10년 금리"),
+    ("rate_us2y",          "미 2년 금리"),
+    ("rate_spread_10_2",   "10-2년 스프레드"),
+    ("rate_hy_spread",     "하이일드 스프레드"),
+    ("macro_cpi",          "미 CPI"),
+    ("macro_unemployment", "미 실업률"),
 ]
 
 
@@ -390,6 +391,58 @@ def build_daily_report(
         sections.append(_SECTION_TEMPLATE.format(
             heading="주요 거시 지표 현황",
             chart_html=table_html,
+        ))
+
+    # ── 3. CFTC COT 포지셔닝 테이블 ─────────────────────────────────────────
+    cot_cols = [
+        ("cot_sp500_net", "S&P500 비상업 순포지션"),
+        ("cot_gold_net",  "금 비상업 순포지션"),
+        ("cot_wti_net",   "WTI 비상업 순포지션"),
+    ]
+    cot_rows = []
+    ref_ts_cot = pd.Timestamp(ref_date)
+    for col, label in cot_cols:
+        if col not in master.columns:
+            continue
+        s = master[col].dropna()
+        if s.empty:
+            continue
+        avail = s.index[s.index <= ref_ts_cot]
+        if avail.empty:
+            continue
+        val = float(s.loc[avail[-1]])
+        prev = s.index[s.index < avail[-1]]
+        chg = f"{val - float(s.loc[prev[-1]]):+,.0f}" if not prev.empty else "—"
+        direction = "매수 우세" if val > 0 else "매도 우세"
+        cot_rows.append((label, f"{val:+,.0f}", chg, direction, avail[-1].strftime("%Y-%m-%d")))
+
+    if cot_rows:
+        cot_tbl = (
+            "<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+            "<tr style='background:#ecf0f1'>"
+            "<th style='padding:6px 12px;text-align:left'>자산</th>"
+            "<th style='padding:6px 12px;text-align:right'>순포지션 (계약)</th>"
+            "<th style='padding:6px 12px;text-align:right'>전주 대비</th>"
+            "<th style='padding:6px 12px;text-align:right'>방향</th>"
+            "<th style='padding:6px 12px;text-align:right'>기준일</th>"
+            "</tr>"
+        )
+        for i, (lbl, val, chg, direction, dt) in enumerate(cot_rows):
+            bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+            dir_color = "#2ecc71" if direction == "매수 우세" else "#e74c3c"
+            cot_tbl += (
+                f"<tr style='background:{bg}'>"
+                f"<td style='padding:6px 12px'>{lbl}</td>"
+                f"<td style='padding:6px 12px;text-align:right'>{val}</td>"
+                f"<td style='padding:6px 12px;text-align:right'>{chg}</td>"
+                f"<td style='padding:6px 12px;text-align:right;color:{dir_color};font-weight:bold'>{direction}</td>"
+                f"<td style='padding:6px 12px;text-align:right;color:#999'>{dt}</td>"
+                "</tr>"
+            )
+        cot_tbl += "</table>"
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="CFTC COT 선물 포지셔닝 (비상업)",
+            chart_html=cot_tbl,
         ))
 
     # 현재 국면 헤더 카드
@@ -503,6 +556,41 @@ def build_weekly_report(
                 ))
     except Exception as e:
         log.warning("build_weekly_report: 국면 분류 실패: %s", e)
+
+    # ── OECD CLI 차트 ────────────────────────────────────────────────────────
+    _CLI_LABELS = {
+        "oecd_cli_us": "미국",
+        "oecd_cli_kr": "한국",
+        "oecd_cli_jp": "일본",
+        "oecd_cli_de": "독일",
+    }
+    cli_cols = [c for c in _CLI_LABELS if c in master.columns]
+    if cli_cols:
+        cutoff_cli = pd.Timestamp(ref_date) - pd.DateOffset(months=24)
+        df_cli = master[cli_cols].loc[master.index >= cutoff_cli].dropna(how="all")
+        if not df_cli.empty:
+            fig_cli = go.Figure()
+            cli_colors = ["#3498db", "#e74c3c", "#2ecc71", "#f39c12"]
+            for i, col in enumerate(cli_cols):
+                s = df_cli[col].dropna()
+                if not s.empty:
+                    fig_cli.add_trace(go.Scatter(
+                        x=s.index, y=s.values, mode="lines+markers",
+                        name=_CLI_LABELS.get(col, col),
+                        line=dict(color=cli_colors[i % len(cli_colors)], width=2),
+                        marker=dict(size=4),
+                    ))
+            fig_cli.add_hline(y=100, line_dash="dash", line_color="#bdc3c7",
+                              annotation_text="기준선 100")
+            fig_cli.update_layout(
+                title="OECD 경기선행지수 (CLI) — 최근 24개월",
+                yaxis=dict(title="CLI 지수"),
+                hovermode="x unified",
+            )
+            sections.append(_SECTION_TEMPLATE.format(
+                heading="OECD 경기선행지수 (CLI)",
+                chart_html=_fig_to_html(fig_cli),
+            ))
 
     # ── 국면별 권장 자산 테이블 ───────────────────────────────────────────────
     asset_table = (
@@ -661,11 +749,12 @@ def build_d2_report(
 
     # ── 3. 금리 현황 테이블 ─────────────────────────────────────────────────
     rate_cols = [
-        ("rate_fed",         "연준 기준금리"),
-        ("rate_us10y",       "미 10년 금리"),
-        ("rate_us2y",        "미 2년 금리"),
-        ("rate_spread_10_2", "10-2년 스프레드"),
-        ("rate_hy_spread",   "하이일드 스프레드"),
+        ("rate_fed",           "연준 기준금리"),
+        ("kr_macro_base_rate", "한국 기준금리"),
+        ("rate_us10y",         "미 10년 금리"),
+        ("rate_us2y",          "미 2년 금리"),
+        ("rate_spread_10_2",   "10-2년 스프레드"),
+        ("rate_hy_spread",     "하이일드 스프레드"),
     ]
     rows = []
     ref_ts = pd.Timestamp(ref_date)
