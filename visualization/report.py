@@ -2647,6 +2647,228 @@ def build_m4_report(
     return str(out.resolve())
 
 
+# ---------------------------------------------------------------------------
+# build_alert_report  (긴급 리포트)
+# ---------------------------------------------------------------------------
+
+def build_alert_report(
+    master: pd.DataFrame,
+    alerts: list,
+    date: str | None = None,
+    output_path: str | None = None,
+) -> str:
+    """
+    긴급 이벤트 감지 시 생성되는 HTML 리포트.
+
+    포함 섹션:
+      1. 알림 요약 카드 (severity별 색상)
+      2. 알림별 상세 컨텍스트
+      3. 주요 자산 스냅샷 (현재값 + 1일/5일/30일 수익률)
+      4. 신호 분류 테이블 (critical/warning/info)
+
+    Args:
+        master       : 병합된 master DataFrame
+        alerts       : check_alerts() 반환값
+        date         : 기준일, None이면 마지막 유효일
+        output_path  : None이면 reports/alerts/alert_{date}.html
+
+    Returns: 저장 경로(str)
+    """
+    from analysis.alerts import Alert, _SEVERITY_ORDER
+
+    alerts_dir = REPORTS_DIR / "alerts"
+    alerts_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_date = date or (master.index[-1].strftime("%Y-%m-%d") if not master.empty else str(date_today()))
+    out = Path(output_path) if output_path else alerts_dir / f"alert_{ref_date}.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    ref_ts = pd.Timestamp(ref_date)
+    sections: list[str] = []
+
+    _SEV_COLOR  = {"critical": "#e74c3c", "warning": "#f39c12", "info": "#3498db"}
+    _SEV_LABEL  = {"critical": "긴급", "warning": "경고", "info": "참고"}
+    _SEV_BG     = {"critical": "#fdf0ef", "warning": "#fef9ec", "info": "#eaf4fb"}
+
+    # ── 1. 알림 요약 카드 ─────────────────────────────────────────────────────
+    n_critical = sum(1 for a in alerts if a.severity == "critical")
+    n_warning  = sum(1 for a in alerts if a.severity == "warning")
+    n_info     = sum(1 for a in alerts if a.severity == "info")
+
+    summary_html = (
+        f"<div style='display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px'>"
+        f"<div style='padding:12px 24px;background:#e74c3c;color:#fff;border-radius:6px;"
+        f"font-size:1.1em;font-weight:bold'>긴급 {n_critical}건</div>"
+        f"<div style='padding:12px 24px;background:#f39c12;color:#fff;border-radius:6px;"
+        f"font-size:1.1em;font-weight:bold'>경고 {n_warning}건</div>"
+        f"<div style='padding:12px 24px;background:#3498db;color:#fff;border-radius:6px;"
+        f"font-size:1.1em;font-weight:bold'>참고 {n_info}건</div>"
+        f"</div>"
+        f"<p style='color:#555;font-size:0.9em'>기준일: {ref_date} | 총 {len(alerts)}개 이벤트 감지</p>"
+    )
+    sections.append(_SECTION_TEMPLATE.format(
+        heading="알림 요약",
+        chart_html=summary_html,
+    ))
+
+    # ── 2. 알림별 상세 ───────────────────────────────────────────────────────
+    alert_cards = ""
+    for a in alerts:
+        color  = _SEV_COLOR.get(a.severity, "#95a5a6")
+        bg     = _SEV_BG.get(a.severity, "#f8f9fa")
+        badge  = _SEV_LABEL.get(a.severity, a.severity)
+        ctx_html = f"<div style='margin-top:8px;font-size:0.85em;color:#666'>{a.context}</div>" if a.context else ""
+        alert_cards += (
+            f"<div style='border-left:5px solid {color};background:{bg};"
+            f"padding:14px 20px;margin-bottom:12px;border-radius:0 6px 6px 0'>"
+            f"<div style='display:flex;align-items:center;gap:10px'>"
+            f"<span style='background:{color};color:#fff;padding:2px 8px;"
+            f"border-radius:3px;font-size:0.8em;font-weight:bold'>{badge}</span>"
+            f"<span style='font-size:1.05em;font-weight:bold;color:{color}'>{a.title}</span>"
+            f"</div>"
+            f"<div style='margin-top:6px;color:#333'>{a.detail}</div>"
+            f"{ctx_html}"
+            f"</div>"
+        )
+    sections.append(_SECTION_TEMPLATE.format(
+        heading="이벤트 상세",
+        chart_html=alert_cards,
+    ))
+
+    # ── 3. 주요 자산 스냅샷 ──────────────────────────────────────────────────
+    snap_cols = [
+        ("us_sp500_close",    "S&P500",     "{:.2f}"),
+        ("kr_kospi_close",    "KOSPI",      "{:.2f}"),
+        ("cmd_gold_close",    "금",          "${:.2f}"),
+        ("cmd_wti_close",     "WTI",        "${:.2f}"),
+        ("fx_krw_usd_close",  "달러/원",    "{:.2f}"),
+        ("alt_vix_close",     "VIX",        "{:.2f}"),
+        ("crypto_btc_close",  "BTC",        "${:,.0f}"),
+        ("rate_us10y_close",  "미10Y",      "{:.2f}%"),
+    ]
+
+    def _ret(col: str, n: int) -> str:
+        if col not in master.columns:
+            return "—"
+        s = master[col].dropna()
+        avail = s.index[s.index <= ref_ts]
+        if len(avail) <= n:
+            return "—"
+        r = (float(s.loc[avail[-1]]) / float(s.loc[avail[-1 - n]]) - 1) * 100
+        color = "#e74c3c" if r > 0 else "#2ecc71"
+        return f"<span style='color:{color}'>{r:+.1f}%</span>"
+
+    snap_tbl = (
+        "<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+        "<tr style='background:#ecf0f1'>"
+        "<th style='padding:6px 12px;text-align:left'>자산</th>"
+        "<th style='padding:6px 12px;text-align:right'>현재값</th>"
+        "<th style='padding:6px 12px;text-align:right'>1일</th>"
+        "<th style='padding:6px 12px;text-align:right'>5일</th>"
+        "<th style='padding:6px 12px;text-align:right'>30일</th>"
+        "</tr>"
+    )
+    for i, (col, name, fmt) in enumerate(snap_cols):
+        if col not in master.columns:
+            continue
+        s = master[col].dropna()
+        avail = s.index[s.index <= ref_ts]
+        if avail.empty:
+            continue
+        val = float(s.loc[avail[-1]])
+        try:
+            val_str = fmt.format(val)
+        except Exception:
+            val_str = f"{val:.2f}"
+        bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+        snap_tbl += (
+            f"<tr style='background:{bg}'>"
+            f"<td style='padding:6px 12px;font-weight:bold'>{name}</td>"
+            f"<td style='padding:6px 12px;text-align:right'>{val_str}</td>"
+            f"<td style='padding:6px 12px;text-align:right'>{_ret(col, 1)}</td>"
+            f"<td style='padding:6px 12px;text-align:right'>{_ret(col, 5)}</td>"
+            f"<td style='padding:6px 12px;text-align:right'>{_ret(col, 30)}</td>"
+            "</tr>"
+        )
+    snap_tbl += "</table>"
+    sections.append(_SECTION_TEMPLATE.format(
+        heading="주요 자산 스냅샷",
+        chart_html=snap_tbl,
+    ))
+
+    # ── 4. 감성·심리 지표 ────────────────────────────────────────────────────
+    psych_rows = []
+    for col, label, lo, hi in [
+        ("alt_vix_close",     "VIX (공포)",            15, 30),
+        ("sent_news_global",  "뉴스 감성 (글로벌)",    -0.3, 0.3),
+        ("sent_news_fed",     "뉴스 감성 (연준)",      -0.3, 0.3),
+        ("epu_us",            "EPU 미국",              100, 250),
+        ("trends_recession",  "recession 검색량",       5,  20),
+        ("trends_stock_crash","stock crash 검색량",     3,  15),
+    ]:
+        if col not in master.columns:
+            continue
+        s_psych = master[col].dropna()
+        avail = s_psych.index[s_psych.index <= ref_ts]
+        if avail.empty:
+            continue
+        v = float(s_psych.loc[avail[-1]])
+        status = "과열/공포" if v > hi else ("안정" if v < lo else "중립")
+        psych_rows.append((label, f"{v:.3f}", status, avail[-1].strftime("%Y-%m-%d")))
+
+    if psych_rows:
+        psych_tbl = (
+            "<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+            "<tr style='background:#ecf0f1'>"
+            "<th style='padding:6px 12px;text-align:left'>지표</th>"
+            "<th style='padding:6px 12px;text-align:right'>현재값</th>"
+            "<th style='padding:6px 12px;text-align:right'>상태</th>"
+            "<th style='padding:6px 12px;text-align:right'>기준일</th>"
+            "</tr>"
+        )
+        for i, (lbl, val, status, dt) in enumerate(psych_rows):
+            bg = "#fff" if i % 2 == 0 else "#f8f9fa"
+            sc = "#e74c3c" if "공포" in status or "과열" in status else (
+                "#2ecc71" if "안정" in status else "#f39c12"
+            )
+            psych_tbl += (
+                f"<tr style='background:{bg}'>"
+                f"<td style='padding:6px 12px'>{lbl}</td>"
+                f"<td style='padding:6px 12px;text-align:right'>{val}</td>"
+                f"<td style='padding:6px 12px;text-align:right;"
+                f"color:{sc};font-weight:bold'>{status}</td>"
+                f"<td style='padding:6px 12px;text-align:right;color:#999'>{dt}</td>"
+                "</tr>"
+            )
+        psych_tbl += "</table>"
+        sections.append(_SECTION_TEMPLATE.format(
+            heading="심리·감성 지표",
+            chart_html=psych_tbl,
+        ))
+
+    # ── 헤더 배너 ─────────────────────────────────────────────────────────────
+    banner_color = "#e74c3c" if n_critical > 0 else ("#f39c12" if n_warning > 0 else "#3498db")
+    banner = (
+        f"<div style='padding:16px 24px;background:{banner_color};color:#fff;"
+        f"border-radius:6px;margin-bottom:24px'>"
+        f"<div style='font-size:1.4em;font-weight:bold'>긴급 시황 알림 — {ref_date}</div>"
+        f"<div style='margin-top:6px;opacity:0.9'>"
+        f"총 {len(alerts)}개 이벤트 감지 | 긴급 {n_critical} · 경고 {n_warning} · 참고 {n_info}</div>"
+        f"</div>"
+    )
+
+    html = _HTML_TEMPLATE.format(
+        title=f"긴급 시황 알림 — {ref_date}",
+        generated_at=ref_date,
+        date_range=ref_date,
+        sections=banner + "\n".join(sections),
+        disclaimer=get_html_disclaimer(lang="ko", length="short"),
+    )
+    out.write_text(html, encoding="utf-8")
+    log.info("build_alert_report: saved to %s", out)
+    return str(out.resolve())
+
+
 def _save_empty_report(out: Path, title: str, ref_date: str) -> str:
     """데이터 부족 시 빈 리포트를 저장하고 경로를 반환한다."""
     html = _HTML_TEMPLATE.format(

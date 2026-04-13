@@ -304,6 +304,21 @@ def main():
         except Exception as e:
             log.warning("institution data failed: %s", e)
 
+    # ── 9. 긴급 알림 체크 (매 실행마다 자동 검사) ───────────────────────────
+    try:
+        from analysis.alerts import check_alerts
+        from visualization.report import build_alert_report
+        alerts = check_alerts(master)
+        if alerts:
+            n_crit = sum(1 for a in alerts if a.severity == "critical")
+            alert_path = build_alert_report(master, alerts)
+            log.info("긴급 리포트 생성 (%d건, critical=%d): %s", len(alerts), n_crit, alert_path)
+            print(f"  Alert: {alert_path}")
+        else:
+            log.info("긴급 알림 없음")
+    except Exception as e:
+        log.warning("alert check failed: %s", e)
+
     import visualization.report as _rpt
     for key in targets:
         func_name, label = _REPORT_MAP[key]
