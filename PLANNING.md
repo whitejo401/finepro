@@ -212,6 +212,7 @@ Phase 8 (데이터 소스 확장): EIA, World Bank, pytrends, GDELT, EPU, CFTC, 
 Phase 9 (마무리): OECD CLI, CBOE P/C(FRED CPCE), ccxt→main.py, 자동화 스케줄러     ✅ 완료
 Phase 10 (Reddit 감성): praw get_reddit_sentiment(), vaderSentiment, main.py 6-e     ✅ 완료
 Phase 11 (버그수정·고도화): OECD CLI 0행 버그, 부동산 리포트, BTC ETF 활성화, 긴급리포트  ✅ 완료
+Phase 12 (API 서버 + 혜택 수집기): FastAPI 주제별 라우터, 복지로/정부24/교육 혜택 수집기    ✅ 완료
 ```
 
 ### 신규 API 키 필요 (Phase 6)
@@ -223,6 +224,69 @@ Phase 11 (버그수정·고도화): OECD CLI 0행 버그, 부동산 리포트, B
 | `REDDIT_CLIENT_ID/SECRET` | Reddit | 심사 중 |
 
 > Whale Alert → 무료 플랜 폐지로 제거. Blockchair/Mempool.space(키 불필요)로 대체.
+
+---
+
+---
+
+## API 서버 구조 (Phase 12, 확정 2026-04-14)
+
+### 위치
+`fine/api/` — fine 프로젝트 내 통합 (parquet 직접 참조)
+
+### 디렉토리
+```
+api/
+├── main.py                      # FastAPI 앱, 라우터 등록, CORS
+├── core/
+│   ├── cache.py                 # 인메모리 TTL 캐시
+│   └── response.py              # 공통 응답 포맷 {status, timestamp, data, meta}
+└── routers/
+    ├── finance/                 # fine 파이프라인 결과 제공
+    │   ├── market.py            # /finance/market/snapshot, /history/{symbol}
+    │   ├── signal.py            # /finance/signal/kospi
+    │   └── report.py            # /finance/report/list, /latest
+    ├── benefits/                # 정부 혜택/지원금
+    │   ├── central.py           # /benefits/central/welfare, /gov24
+    │   └── education.py         # /benefits/education/voucher, /scholarship, /training
+    ├── realestate/              # 부동산
+    │   └── apt.py               # /realestate/apt/trade
+    └── crypto/                  # 암호화폐
+        └── market.py            # /crypto/market/snapshot
+```
+
+### 엔드포인트 전체 목록
+| 그룹 | 엔드포인트 | 캐시 TTL | 설명 |
+|------|-----------|---------|------|
+| finance | `GET /api/v1/finance/market/snapshot` | 5분 | 글로벌 지수·환율·원자재 최신값 |
+| finance | `GET /api/v1/finance/market/history/{symbol}` | 5분 | 심볼 시계열 (기본 90일) |
+| finance | `GET /api/v1/finance/signal/kospi` | 1시간 | KOSPI 방향 예측 신호 |
+| finance | `GET /api/v1/finance/report/list?type=daily` | 10분 | 리포트 목록 |
+| finance | `GET /api/v1/finance/report/latest?type=daily` | — | 최신 HTML 리포트 |
+| benefits | `GET /api/v1/benefits/central/welfare` | 6시간 | 복지로 복지서비스 목록 |
+| benefits | `GET /api/v1/benefits/central/welfare/{id}` | 6시간 | 복지서비스 상세 |
+| benefits | `GET /api/v1/benefits/central/gov24` | 6시간 | 정부24 생애주기 서비스 |
+| benefits | `GET /api/v1/benefits/education/voucher` | 6시간 | 평생교육바우처 |
+| benefits | `GET /api/v1/benefits/education/scholarship` | 6시간 | 국가장학금 |
+| benefits | `GET /api/v1/benefits/education/training` | 6시간 | 국민내일배움카드 직업훈련 |
+| realestate | `GET /api/v1/realestate/apt/trade` | 24시간 | 아파트 실거래가 |
+| crypto | `GET /api/v1/crypto/market/snapshot` | 1분 | BTC·ETH·도미넌스 |
+
+### 실행 방법
+```bash
+# 개발
+uvicorn api.main:app --reload --port 8000
+
+# 프로덕션
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2
+```
+
+### Next.js 연동
+```typescript
+// Next.js → FastAPI 호출 예시
+const res = await fetch('http://localhost:8000/api/v1/benefits/central/welfare?life_stage=청년')
+const { data } = await res.json()
+```
 
 ---
 

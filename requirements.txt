@@ -36,6 +36,10 @@ vaderSentiment>=3.3.2
 pytrends>=4.9.2
 requests>=2.32.0
 
+# API 서버
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+
 # 개발 도구
 jupyter>=1.0.0
 ipykernel>=6.29.0
