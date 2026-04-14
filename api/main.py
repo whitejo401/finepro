@@ -2,11 +2,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import finance, benefits, realestate, crypto, exchange, weather
+from api.routers import finance, benefits, realestate, crypto, exchange, weather, news
 
 app = FastAPI(
     title="Info API",
-    description="금융·혜택·부동산·암호화폐·환율·날씨 등 주제별 정보 API",
+    description="금융·혜택·부동산·암호화폐·환율·날씨·뉴스 등 주제별 정보 API",
     version="1.0.0",
 )
 
@@ -25,6 +25,7 @@ app.include_router(realestate.router, prefix="/api/v1/realestate", tags=["reales
 app.include_router(crypto.router,     prefix="/api/v1/crypto",     tags=["crypto"])
 app.include_router(exchange.router,   prefix="/api/v1/exchange",   tags=["exchange"])
 app.include_router(weather.router,    prefix="/api/v1/weather",    tags=["weather"])
+app.include_router(news.router,       prefix="/api/v1/news",       tags=["news"])
 
 
 @app.get("/")
@@ -39,6 +40,7 @@ def root():
             "/api/v1/crypto",
             "/api/v1/exchange",
             "/api/v1/weather",
+            "/api/v1/news",
         ],
     }
 

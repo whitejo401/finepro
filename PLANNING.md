@@ -280,6 +280,11 @@ api/
 | weather | `GET /api/v1/weather/forecast/hourly?city=tokyo` | 30분 | 시간별 예보 (48시간) |
 | weather | `GET /api/v1/weather/forecast/aqi?city=seoul` | 10분 | 대기질 PM10·PM2.5 + 한국 등급 |
 | weather | `GET /api/v1/weather/forecast/cities` | — | 지원 도시 목록 (국내 8개 + 해외 9개) |
+| news | `GET /api/v1/news/headlines/top?country=kr&category=technology` | 15분 | 국가별 주요 헤드라인 (NewsAPI) |
+| news | `GET /api/v1/news/headlines/search?query=금리` | 30분 | 키워드 뉴스 검색 |
+| news | `GET /api/v1/news/geek/latest` | 10분 | GeekNews 최신 IT 기술 뉴스 (RSS, 키 불필요) |
+| news | `GET /api/v1/news/geek/trending?days=7` | 1시간 | GeekNews 트렌드 키워드 추출 |
+| news | `GET /api/v1/news/geek/category/AI/ML` | 10분 | GeekNews 카테고리별 기사 (AI/ML·보안·오픈소스 등) |
 
 ### 실행 방법
 ```bash
