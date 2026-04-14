@@ -275,6 +275,11 @@ api/
 | exchange | `GET /api/v1/exchange/rates/history?base=USD&target=KRW` | 1시간 | 기간별 환율 이력 |
 | exchange | `GET /api/v1/exchange/rates/convert?amount=100&base=USD&target=KRW` | — | 환전 계산 |
 | exchange | `GET /api/v1/exchange/rates/krw` | 10분 | 원화 기준 주요 통화 (ECOS+frankfurter) |
+| weather | `GET /api/v1/weather/forecast/current?city=seoul` | 10분 | 현재 날씨 (기온·체감·습도·UV 등) |
+| weather | `GET /api/v1/weather/forecast/daily?city=seoul&days=7` | 30분 | 일별 예보 (최대 16일) |
+| weather | `GET /api/v1/weather/forecast/hourly?city=tokyo` | 30분 | 시간별 예보 (48시간) |
+| weather | `GET /api/v1/weather/forecast/aqi?city=seoul` | 10분 | 대기질 PM10·PM2.5 + 한국 등급 |
+| weather | `GET /api/v1/weather/forecast/cities` | — | 지원 도시 목록 (국내 8개 + 해외 9개) |
 
 ### 실행 방법
 ```bash
