@@ -271,6 +271,10 @@ api/
 | benefits | `GET /api/v1/benefits/education/training` | 6시간 | 국민내일배움카드 직업훈련 |
 | realestate | `GET /api/v1/realestate/apt/trade` | 24시간 | 아파트 실거래가 |
 | crypto | `GET /api/v1/crypto/market/snapshot` | 1분 | BTC·ETH·도미넌스 |
+| exchange | `GET /api/v1/exchange/rates/latest?base=USD` | 10분 | 최신 환율 (ECB 기준, 키 불필요) |
+| exchange | `GET /api/v1/exchange/rates/history?base=USD&target=KRW` | 1시간 | 기간별 환율 이력 |
+| exchange | `GET /api/v1/exchange/rates/convert?amount=100&base=USD&target=KRW` | — | 환전 계산 |
+| exchange | `GET /api/v1/exchange/rates/krw` | 10분 | 원화 기준 주요 통화 (ECOS+frankfurter) |
 
 ### 실행 방법
 ```bash
