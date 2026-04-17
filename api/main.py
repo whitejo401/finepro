@@ -16,6 +16,7 @@ from api.routers.medical import router as medical_router
 from api.routers.seasonal import router as seasonal_router
 from api.routers.saving import router as saving_router
 from api.routers.game import router as game_router
+from api.routers.transit import router as transit_router
 
 app = FastAPI(
     title="Info API",
@@ -52,6 +53,7 @@ app.include_router(medical_router,      prefix="/api/v1/medical",        tags=["
 app.include_router(seasonal_router,     prefix="/api/v1/seasonal",       tags=["seasonal"])
 app.include_router(saving_router,       prefix="/api/v1/saving",         tags=["saving"])
 app.include_router(game_router,         prefix="/api/v1/game",           tags=["game"])
+app.include_router(transit_router,      prefix="/api/v1/transit",        tags=["transit"])
 
 
 @app.get("/")
@@ -80,6 +82,7 @@ def root():
             "/api/v1/seasonal",
             "/api/v1/saving",
             "/api/v1/game",
+            "/api/v1/transit",
         ],
     }
 
