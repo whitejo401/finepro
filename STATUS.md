@@ -6,8 +6,8 @@
 
 ## 현재 단계
 
-**Phase 13 — 신규 API 그룹 구현 진행 중**
-마지막 작업일: 2026-04-17 (~ transit 완료, card 다음)
+**Phase 13 — 전체 완료**
+마지막 작업일: 2026-04-17 (전체 23개 그룹, 152개 엔드포인트 구현 완료)
 
 ---
 
@@ -35,7 +35,7 @@
 | ✅ 완료 | saving | `api/routers/saving/` — 11개 EP, main.py 등록 완료 |
 | ✅ 완료 | game | `api/routers/game/` — 21개 EP, main.py 등록 완료 |
 | ✅ 완료 | transit | `api/routers/transit/` — 7개 EP, main.py 등록 완료 |
-| ⬜ 미시작 | card | 기획완료 (`docs/PLAN_phase13_card.md`) |
+| ✅ 완료 | card | `api/routers/card/` — 6개 EP, main.py 등록 완료 |
 | ✅ 완료 | crypto_intel | `api/routers/crypto_intel/` — 13개 EP, main.py 등록 완료 |
 
 ---
@@ -48,7 +48,7 @@
 
 ## 다음 할 일 (우선순위 순)
 
-1. 나머지 1개 그룹 구현 (card)
+1. Phase 13 전 그룹 구현 완료. 다음 단계 기획 필요.
 
 ---
 
