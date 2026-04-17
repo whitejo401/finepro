@@ -8,6 +8,7 @@ from api.routers.indicator import router as indicator_router
 from api.routers.invest import router as invest_router
 from api.routers.crypto_intel import router as crypto_intel_router
 from api.routers.kids import router as kids_router
+from api.routers.culture import router as culture_router
 
 app = FastAPI(
     title="Info API",
@@ -36,6 +37,7 @@ app.include_router(indicator_router,  prefix="/api/v1/indicator",  tags=["indica
 app.include_router(invest_router,        prefix="/api/v1/invest",        tags=["invest"])
 app.include_router(crypto_intel_router, prefix="/api/v1/crypto_intel",  tags=["crypto_intel"])
 app.include_router(kids_router,         prefix="/api/v1/kids",           tags=["kids"])
+app.include_router(culture_router,      prefix="/api/v1/culture",        tags=["culture"])
 
 
 @app.get("/")
@@ -56,6 +58,7 @@ def root():
             "/api/v1/invest",
             "/api/v1/crypto_intel",
             "/api/v1/kids",
+            "/api/v1/culture",
         ],
     }
 
