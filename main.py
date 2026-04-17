@@ -349,6 +349,15 @@ def main():
     for p in generated:
         print(f"Report: {p}")
 
+    # ── 10. 인덱스 페이지 생성 ──────────────────────────────────────────────
+    try:
+        from visualization.index import build_index_page
+        index_path = build_index_page(master)
+        log.info("인덱스 페이지: %s", index_path)
+        print(f"Index: {index_path}")
+    except Exception as e:
+        log.warning("index page failed: %s", e)
+
 
 if __name__ == "__main__":
     main()

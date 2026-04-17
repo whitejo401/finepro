@@ -23,7 +23,7 @@ FRED_SERIES: dict[str, str] = {
     "macro_cpi":          "CPIAUCSL",      # 미국 CPI (월간)
     "macro_pce":          "PCEPI",         # PCE 물가지수 (월간)
     # 성장
-    "macro_pmi_us":       "MANEMP",        # 제조업 고용 (PMI 대리변수)
+    "macro_pmi_us":       "INDPRO",        # 산업생산지수 (PMI 방향성 대리변수, 월간)
     "macro_gdp_us":       "GDP",           # 미국 GDP (분기)
     "macro_unemployment": "UNRATE",        # 실업률 (월간)
     # 금리/신용

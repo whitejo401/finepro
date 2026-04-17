@@ -22,6 +22,10 @@ from config import PROCESSED_DIR, DEFAULT_START
 
 log = get_logger("processors.merger")
 
+# 룩어헤드 바이어스 방지: master에 포함되지만 피처로 사용 금지인 타겟 컬럼
+# shift(-1) 을 사용해 미래 값을 참조하므로 예측 피처·백테스트 신호에서 반드시 제외
+TARGET_COLS: frozenset[str] = frozenset({"kr_kospi_gap"})
+
 # 기본 수집 대상
 _DEFAULT_TICKERS_KR = ["005930", "000660", "035420"]  # 삼성전자, SK하이닉스, NAVER
 _DEFAULT_TICKERS_GLOBAL = [
@@ -116,8 +120,8 @@ def merge_dataframes(
     merged = merged.sort_index()
     merged.index.name = "date"
 
-    # 결측값 채움: 주말/공휴일 등 비거래일 보정
-    merged = merged.ffill(limit=5)
+    # 결측값 채움: 일간은 5일(주말), 월간/분기 지표는 최대 66일(분기~3개월) 허용
+    merged = merged.ffill(limit=66)
     merged = merged.bfill(limit=1)
 
     # 파생 컬럼 추가

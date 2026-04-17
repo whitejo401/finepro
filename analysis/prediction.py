@@ -71,8 +71,10 @@ def lag_correlation_rank(
 
     from scipy import stats
 
+    from processors.merger import TARGET_COLS
     target_ret = master[target].pct_change(fill_method=None).dropna()
-    candidates = [c for c in _DEFAULT_FEATURE_COLS if c in master.columns and c != target]
+    candidates = [c for c in _DEFAULT_FEATURE_COLS
+                  if c in master.columns and c != target and c not in TARGET_COLS]
 
     rows = []
     for col in candidates:
@@ -395,10 +397,13 @@ def build_today_prediction(
     except Exception as e:
         log.warning("로지스틱 예측 실패: %s", e)
 
-    # 개별 변수 부호 상세
+    # 개별 변수 부호 상세 (표시 전용 — 신호 생성에 사용 금지)
+    from processors.merger import TARGET_COLS
     vote_detail = {}
     feat_cols = top_features["feature"].tolist() if not top_features.empty else []
     for col in feat_cols:
+        if col in TARGET_COLS:
+            continue
         if col in master.columns:
             s = master[col].pct_change(fill_method=None).dropna()
             if not s.empty:
