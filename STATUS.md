@@ -7,7 +7,7 @@
 ## 현재 단계
 
 **Phase 13 — 신규 API 그룹 구현 진행 중**
-마지막 작업일: 2026-04-17
+마지막 작업일: 2026-04-17 (index·indicator·invest 완료, crypto_intel 다음)
 
 ---
 
@@ -22,9 +22,9 @@
 | ✅ 완료 | exchange | `api/routers/exchange/` |
 | ✅ 완료 | weather | `api/routers/weather/` |
 | ✅ 완료 | news | `api/routers/news/` |
-| 🔨 구현중 | index | `api/routers/index/` — 파일 생성됨, main.py 연결 미확인 |
-| 🔨 구현중 | indicator | `api/routers/indicator/` — 파일 생성됨, main.py 연결 미확인 |
-| 🔨 구현중 | invest | `api/routers/invest/` — 파일 생성됨, main.py 연결 미확인 |
+| ✅ 완료 | index | `api/routers/index/` — 11개 EP, main.py 등록 완료 |
+| ✅ 완료 | indicator | `api/routers/indicator/` — 8개 EP, main.py 등록 완료 |
+| ✅ 완료 | invest | `api/routers/invest/` — 8개 EP, main.py 등록 완료 |
 | ⬜ 미시작 | kids | 기획완료 (`docs/PLAN_phase13_kids.md`) |
 | ⬜ 미시작 | culture | 기획완료 (`docs/PLAN_phase13_culture.md`) |
 | ⬜ 미시작 | outdoor | 기획완료 (`docs/PLAN_phase13_outdoor.md`) |
@@ -43,27 +43,16 @@
 ## 미커밋 변경사항
 
 ```
-M  PLANNING.md              — Phase13 crypto_intel 기획 추가
-M  analysis/prediction.py
-M  api/main.py
-M  collectors/global_/macro.py
-M  main.py
-M  processors/merger.py
-?? api/routers/index/
-?? api/routers/indicator/
-?? api/routers/invest/
-?? docs/PLAN_phase13_*.md   — 14개
-?? visualization/index.py
+M  api/main.py              — invest 라우터 등록
+?? api/routers/invest/__init__.py
 ```
 
 ---
 
 ## 다음 할 일 (우선순위 순)
 
-1. **index / indicator / invest 구현 완료 확인** — 파일은 있으나 `api/main.py` 라우터 등록 여부 미확인
-2. **미커밋 파일 전체 커밋** — 위 변경사항 정리
-3. **crypto_intel 구현** — `api/routers/crypto_intel/` 신규 (섹터·기관보유·개발활동)
-4. 나머지 11개 그룹 순차 구현 (kids → culture → outdoor → ...)
+1. **crypto_intel 구현** — `api/routers/crypto_intel/` 신규 (섹터·기관보유·개발활동, 13개 EP)
+2. 나머지 11개 그룹 순차 구현 (kids → culture → outdoor → travel → price → medical → seasonal → saving → game → transit → card)
 
 ---
 
