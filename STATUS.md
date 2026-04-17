@@ -7,7 +7,7 @@
 ## 현재 단계
 
 **Phase 13 — 신규 API 그룹 구현 진행 중**
-마지막 작업일: 2026-04-17 (~ seasonal 완료, saving 다음)
+마지막 작업일: 2026-04-17 (~ game 완료, transit 다음)
 
 ---
 
@@ -32,8 +32,8 @@
 | ✅ 완료 | price | `api/routers/price/` — 5개 EP, main.py 등록 완료 |
 | ✅ 완료 | medical | `api/routers/medical/` — 6개 EP, main.py 등록 완료 |
 | ✅ 완료 | seasonal | `api/routers/seasonal/` — 6개 EP, main.py 등록 완료 |
-| ⬜ 미시작 | saving | 기획완료 (`docs/PLAN_phase13_saving.md`) |
-| ⬜ 미시작 | game | 기획완료 (`docs/PLAN_phase13_game.md`) |
+| ✅ 완료 | saving | `api/routers/saving/` — 11개 EP, main.py 등록 완료 |
+| ✅ 완료 | game | `api/routers/game/` — 21개 EP, main.py 등록 완료 |
 | ⬜ 미시작 | transit | 기획완료 (`docs/PLAN_phase13_transit.md`) |
 | ⬜ 미시작 | card | 기획완료 (`docs/PLAN_phase13_card.md`) |
 | ✅ 완료 | crypto_intel | `api/routers/crypto_intel/` — 13개 EP, main.py 등록 완료 |
@@ -48,7 +48,7 @@
 
 ## 다음 할 일 (우선순위 순)
 
-1. 나머지 4개 그룹 순차 구현 (saving → game → transit → card)
+1. 나머지 2개 그룹 순차 구현 (transit → card)
 
 ---
 
