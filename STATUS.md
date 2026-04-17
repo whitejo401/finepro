@@ -7,7 +7,7 @@
 ## 현재 단계
 
 **Phase 13 — 신규 API 그룹 구현 진행 중**
-마지막 작업일: 2026-04-17 (index·indicator·invest 완료, crypto_intel 다음)
+마지막 작업일: 2026-04-17 (index·indicator·invest·crypto_intel 완료, kids 다음)
 
 ---
 
@@ -36,23 +36,19 @@
 | ⬜ 미시작 | game | 기획완료 (`docs/PLAN_phase13_game.md`) |
 | ⬜ 미시작 | transit | 기획완료 (`docs/PLAN_phase13_transit.md`) |
 | ⬜ 미시작 | card | 기획완료 (`docs/PLAN_phase13_card.md`) |
-| ⬜ 미시작 | crypto_intel | 기획완료 (`PLANNING.md` — 섹터/기관보유/개발활동 13개 EP) |
+| ✅ 완료 | crypto_intel | `api/routers/crypto_intel/` — 13개 EP, main.py 등록 완료 |
 
 ---
 
 ## 미커밋 변경사항
 
-```
-M  api/main.py              — invest 라우터 등록
-?? api/routers/invest/__init__.py
-```
+없음 (클린)
 
 ---
 
 ## 다음 할 일 (우선순위 순)
 
-1. **crypto_intel 구현** — `api/routers/crypto_intel/` 신규 (섹터·기관보유·개발활동, 13개 EP)
-2. 나머지 11개 그룹 순차 구현 (kids → culture → outdoor → travel → price → medical → seasonal → saving → game → transit → card)
+1. 나머지 11개 그룹 순차 구현 (kids → culture → outdoor → travel → price → medical → seasonal → saving → game → transit → card)
 
 ---
 

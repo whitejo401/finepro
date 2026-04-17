@@ -6,6 +6,7 @@ from api.routers import finance, benefits, realestate, crypto, exchange, weather
 from api.routers.index import router as index_router
 from api.routers.indicator import router as indicator_router
 from api.routers.invest import router as invest_router
+from api.routers.crypto_intel import router as crypto_intel_router
 
 app = FastAPI(
     title="Info API",
@@ -31,7 +32,8 @@ app.include_router(weather.router,    prefix="/api/v1/weather",    tags=["weathe
 app.include_router(news.router,       prefix="/api/v1/news",       tags=["news"])
 app.include_router(index_router,      prefix="/api/v1/index",      tags=["index"])
 app.include_router(indicator_router,  prefix="/api/v1/indicator",  tags=["indicator"])
-app.include_router(invest_router,     prefix="/api/v1/invest",     tags=["invest"])
+app.include_router(invest_router,        prefix="/api/v1/invest",        tags=["invest"])
+app.include_router(crypto_intel_router, prefix="/api/v1/crypto_intel",  tags=["crypto_intel"])
 
 
 @app.get("/")
@@ -50,6 +52,7 @@ def root():
             "/api/v1/index",
             "/api/v1/indicator",
             "/api/v1/invest",
+            "/api/v1/crypto_intel",
         ],
     }
 
