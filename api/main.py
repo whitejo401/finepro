@@ -11,6 +11,7 @@ from api.routers.kids import router as kids_router
 from api.routers.culture import router as culture_router
 from api.routers.outdoor import router as outdoor_router
 from api.routers.travel import router as travel_router
+from api.routers.price import router as price_router
 
 app = FastAPI(
     title="Info API",
@@ -42,6 +43,7 @@ app.include_router(kids_router,         prefix="/api/v1/kids",           tags=["
 app.include_router(culture_router,      prefix="/api/v1/culture",        tags=["culture"])
 app.include_router(outdoor_router,      prefix="/api/v1/outdoor",        tags=["outdoor"])
 app.include_router(travel_router,       prefix="/api/v1/travel",         tags=["travel"])
+app.include_router(price_router,        prefix="/api/v1/price",          tags=["price"])
 
 
 @app.get("/")
@@ -65,6 +67,7 @@ def root():
             "/api/v1/culture",
             "/api/v1/outdoor",
             "/api/v1/travel",
+            "/api/v1/price",
         ],
     }
 
