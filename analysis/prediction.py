@@ -303,6 +303,299 @@ def rolling_ols_gap(
 
 
 # ---------------------------------------------------------------------------
+# rolling_rf_predict  (RandomForest 롤링 분류)
+# ---------------------------------------------------------------------------
+
+def rolling_rf_predict(
+    master: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+    target: str = _TARGET_COL,
+    lag: int = 1,
+    window: int = 120,
+    n_estimators: int = 100,
+) -> pd.DataFrame:
+    """
+    RandomForestClassifier 롤링 학습으로 KOSPI 상승 확률 예측.
+
+    Logit 대비 장점:
+      - 비선형 관계 포착
+      - 피처 중요도 자동 계산
+      - 과적합에 강함 (앙상블)
+
+    Args:
+        master       : master DataFrame
+        feature_cols : 선행 변수 리스트 (None이면 Spearman 상위 8개 자동 선택)
+        target       : 타겟 컬럼
+        lag          : 선행 일수
+        window       : 롤링 학습 창 (일, 기본 120일)
+        n_estimators : 트리 수
+
+    Returns:
+        DataFrame (columns: prob_up, predicted, actual, hit)
+        feature_importances_ 는 마지막 모델 기준으로 로그 출력
+    """
+    try:
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.preprocessing import StandardScaler
+    except ImportError:
+        log.warning("rolling_rf_predict: scikit-learn 미설치 — pip install scikit-learn")
+        return pd.DataFrame()
+
+    if target not in master.columns:
+        return pd.DataFrame()
+
+    if feature_cols is None:
+        rank_df = lag_correlation_rank(master, target=target, lag=lag, top_n=8)
+        feature_cols = rank_df["feature"].tolist() if not rank_df.empty else _DEFAULT_FEATURE_COLS
+
+    available = [c for c in feature_cols if c in master.columns]
+    if not available:
+        log.warning("rolling_rf_predict: feature_cols 없음")
+        return pd.DataFrame()
+
+    feats = pd.DataFrame({col: master[col].pct_change(fill_method=None) for col in available})
+    target_ret  = master[target].pct_change(fill_method=None)
+    target_dir  = (target_ret > 0).astype(int)
+    feats_lagged = feats.shift(lag)
+
+    combined = pd.concat([feats_lagged, target_dir.rename("y")], axis=1).dropna()
+
+    if len(combined) < window + 10:
+        log.warning("rolling_rf_predict: 데이터 부족 (%d행, window=%d)", len(combined), window)
+        return pd.DataFrame()
+
+    results = []
+    last_model = None
+
+    for i in range(window, len(combined)):
+        train    = combined.iloc[i - window:i]
+        test_row = combined.iloc[i:i + 1]
+
+        X_train = train[available].values
+        y_train = train["y"].values
+        X_test  = test_row[available].values
+
+        scaler  = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test  = scaler.transform(X_test)
+
+        try:
+            clf = RandomForestClassifier(
+                n_estimators=n_estimators,
+                max_depth=4,
+                random_state=42,
+                n_jobs=1,
+            )
+            clf.fit(X_train, y_train)
+            prob = float(clf.predict_proba(X_test)[0][1])
+            last_model = (clf, available)
+        except Exception:
+            prob = 0.5
+
+        actual_dir = int(test_row["y"].iloc[0])
+        results.append({
+            "date":      combined.index[i],
+            "prob_up":   round(prob, 4),
+            "predicted": 1 if prob >= 0.5 else -1,
+            "actual":    1 if actual_dir == 1 else -1,
+        })
+
+    if not results:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(results).set_index("date")
+    df["hit"] = (df["predicted"] == df["actual"]).astype(int)
+
+    # 마지막 모델 피처 중요도 로그
+    if last_model:
+        clf, cols = last_model
+        importances = sorted(
+            zip(cols, clf.feature_importances_), key=lambda x: x[1], reverse=True
+        )
+        log.info(
+            "rolling_rf_predict: 적중률=%.1f%%, 피처 중요도 top3: %s",
+            df["hit"].mean() * 100,
+            importances[:3],
+        )
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# rolling_lgbm_predict  (LightGBM 롤링 분류)
+# ---------------------------------------------------------------------------
+
+def rolling_lgbm_predict(
+    master: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+    target: str = _TARGET_COL,
+    lag: int = 1,
+    window: int = 120,
+) -> pd.DataFrame:
+    """
+    LightGBM 롤링 학습으로 KOSPI 상승 확률 예측.
+
+    RF 대비 장점:
+      - 학습 속도 빠름 (Gradient Boosting)
+      - 소표본에서도 우수한 성능
+      - 범주형 피처 자동 처리
+
+    Returns:
+        DataFrame (columns: prob_up, predicted, actual, hit)
+    """
+    try:
+        import lightgbm as lgb
+    except ImportError:
+        log.warning("rolling_lgbm_predict: lightgbm 미설치 — pip install lightgbm")
+        return pd.DataFrame()
+
+    if target not in master.columns:
+        return pd.DataFrame()
+
+    if feature_cols is None:
+        rank_df = lag_correlation_rank(master, target=target, lag=lag, top_n=8)
+        feature_cols = rank_df["feature"].tolist() if not rank_df.empty else _DEFAULT_FEATURE_COLS
+
+    available = [c for c in feature_cols if c in master.columns]
+    if not available:
+        return pd.DataFrame()
+
+    feats = pd.DataFrame({col: master[col].pct_change(fill_method=None) for col in available})
+    target_ret  = master[target].pct_change(fill_method=None)
+    target_dir  = (target_ret > 0).astype(int)
+    feats_lagged = feats.shift(lag)
+
+    combined = pd.concat([feats_lagged, target_dir.rename("y")], axis=1).dropna()
+
+    if len(combined) < window + 10:
+        log.warning("rolling_lgbm_predict: 데이터 부족 (%d행, window=%d)", len(combined), window)
+        return pd.DataFrame()
+
+    params = {
+        "objective":  "binary",
+        "metric":     "binary_logloss",
+        "n_estimators": 50,
+        "max_depth":  4,
+        "learning_rate": 0.05,
+        "num_leaves": 15,
+        "random_state": 42,
+        "verbose": -1,
+    }
+
+    results = []
+    for i in range(window, len(combined)):
+        train    = combined.iloc[i - window:i]
+        test_row = combined.iloc[i:i + 1]
+
+        X_train = train[available]
+        y_train = train["y"]
+        X_test  = test_row[available]
+
+        try:
+            clf = lgb.LGBMClassifier(**params)
+            clf.fit(X_train, y_train)
+            prob = float(clf.predict_proba(X_test)[0][1])
+        except Exception:
+            prob = 0.5
+
+        actual_dir = int(test_row["y"].iloc[0])
+        results.append({
+            "date":      combined.index[i],
+            "prob_up":   round(prob, 4),
+            "predicted": 1 if prob >= 0.5 else -1,
+            "actual":    1 if actual_dir == 1 else -1,
+        })
+
+    if not results:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(results).set_index("date")
+    df["hit"] = (df["predicted"] == df["actual"]).astype(int)
+    log.info(
+        "rolling_lgbm_predict: %d건 예측, 누적 적중률=%.1f%%",
+        len(df), df["hit"].mean() * 100,
+    )
+    return df
+
+
+# ---------------------------------------------------------------------------
+# model_ensemble_predict  (Logit + RF + LightGBM 앙상블)
+# ---------------------------------------------------------------------------
+
+def model_ensemble_predict(
+    master: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+    target: str = _TARGET_COL,
+    lag: int = 1,
+    window: int = 120,
+) -> pd.DataFrame:
+    """
+    Logit + RandomForest + LightGBM 평균 확률 앙상블 예측.
+
+    각 모델을 독립 실행 후 prob_up 단순 평균.
+    모델이 1개만 성공해도 결과 반환 (부분 앙상블).
+
+    Returns:
+        DataFrame (columns: prob_up_logit, prob_up_rf, prob_up_lgbm,
+                             prob_up_ensemble, predicted, actual, hit)
+    """
+    dfs: dict[str, pd.DataFrame] = {}
+
+    # Logit
+    try:
+        df_logit = rolling_logit_predict(master, feature_cols=feature_cols,
+                                          target=target, lag=lag, window=window)
+        if not df_logit.empty:
+            dfs["logit"] = df_logit["prob_up"].rename("prob_up_logit")
+    except Exception as e:
+        log.warning("앙상블 logit 실패: %s", e)
+
+    # RandomForest
+    try:
+        df_rf = rolling_rf_predict(master, feature_cols=feature_cols,
+                                    target=target, lag=lag, window=window)
+        if not df_rf.empty:
+            dfs["rf"] = df_rf["prob_up"].rename("prob_up_rf")
+    except Exception as e:
+        log.warning("앙상블 RF 실패: %s", e)
+
+    # LightGBM
+    try:
+        df_lgbm = rolling_lgbm_predict(master, feature_cols=feature_cols,
+                                        target=target, lag=lag, window=window)
+        if not df_lgbm.empty:
+            dfs["lgbm"] = df_lgbm["prob_up"].rename("prob_up_lgbm")
+    except Exception as e:
+        log.warning("앙상블 LightGBM 실패: %s", e)
+
+    if not dfs:
+        log.warning("model_ensemble_predict: 성공한 모델 없음")
+        return pd.DataFrame()
+
+    # 공통 날짜 기준으로 결합
+    combined_probs = pd.concat(list(dfs.values()), axis=1)
+    combined_probs["prob_up_ensemble"] = combined_probs.mean(axis=1)
+    combined_probs["predicted"] = (combined_probs["prob_up_ensemble"] >= 0.5).map({True: 1, False: -1})
+
+    # actual 방향 계산 (target 수익률 부호)
+    target_ret = master[target].pct_change(fill_method=None)
+    actual_dir = target_ret.apply(lambda x: 1 if x > 0 else -1)
+    combined_probs = combined_probs.join(actual_dir.rename("actual"), how="left")
+    combined_probs["hit"] = (combined_probs["predicted"] == combined_probs["actual"]).astype(int)
+
+    valid = combined_probs.dropna(subset=["actual"])
+    if not valid.empty:
+        log.info(
+            "model_ensemble_predict: 앙상블 적중률=%.1f%% (%d건, 모델=%s)",
+            valid["hit"].mean() * 100,
+            len(valid),
+            list(dfs.keys()),
+        )
+
+    return combined_probs
+
+
+# ---------------------------------------------------------------------------
 # 예측 로그 저장/불러오기
 # ---------------------------------------------------------------------------
 
@@ -388,14 +681,37 @@ def build_today_prediction(
     signal = majority_vote_signal(master, target=target, lag=lag)
     today_signal = int(signal.iloc[-1]) if not signal.empty else 0
 
-    # 로지스틱 확률 (마지막 값만 사용)
+    # 모델별 확률 (마지막 값 사용)
     prob_up = None
+    prob_up_rf = None
+    prob_up_lgbm = None
+    prob_up_ensemble = None
+
     try:
         logit_df = rolling_logit_predict(master, target=target, lag=lag, window=60)
         if not logit_df.empty:
             prob_up = float(logit_df["prob_up"].iloc[-1])
     except Exception as e:
         log.warning("로지스틱 예측 실패: %s", e)
+
+    try:
+        rf_df = rolling_rf_predict(master, target=target, lag=lag, window=120)
+        if not rf_df.empty:
+            prob_up_rf = float(rf_df["prob_up"].iloc[-1])
+    except Exception as e:
+        log.warning("RF 예측 실패: %s", e)
+
+    try:
+        lgbm_df = rolling_lgbm_predict(master, target=target, lag=lag, window=120)
+        if not lgbm_df.empty:
+            prob_up_lgbm = float(lgbm_df["prob_up"].iloc[-1])
+    except Exception as e:
+        log.warning("LightGBM 예측 실패: %s", e)
+
+    # 앙상블: 성공한 모델의 평균
+    available_probs = [p for p in [prob_up, prob_up_rf, prob_up_lgbm] if p is not None]
+    if available_probs:
+        prob_up_ensemble = round(sum(available_probs) / len(available_probs), 4)
 
     # 개별 변수 부호 상세 (표시 전용 — 신호 생성에 사용 금지)
     from processors.merger import TARGET_COLS
@@ -410,9 +726,12 @@ def build_today_prediction(
                 vote_detail[col] = int(np.sign(s.iloc[-1]))
 
     return {
-        "signal": today_signal,
-        "prob_up": prob_up,
-        "top_features": top_features,
-        "vote_detail": vote_detail,
-        "ref_date": ref_date,
+        "signal":           today_signal,
+        "prob_up":          prob_up,           # Logit
+        "prob_up_rf":       prob_up_rf,         # RandomForest
+        "prob_up_lgbm":     prob_up_lgbm,       # LightGBM
+        "prob_up_ensemble": prob_up_ensemble,   # 앙상블 평균
+        "top_features":     top_features,
+        "vote_detail":      vote_detail,
+        "ref_date":         ref_date,
     }

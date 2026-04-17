@@ -2856,8 +2856,11 @@ def build_m4_report(
                    "</tr>")
             for yr in annual_port.index:
                 yr_str = yr.strftime("%Y")
-                p_val  = annual_port.get(yr, float("nan"))
-                b_val  = annual_bench.get(yr, float("nan")) if not annual_bench.empty else float("nan")
+                _pv = annual_port.get(yr, float("nan"))
+                _bv = annual_bench.get(yr, float("nan")) if not annual_bench.empty else float("nan")
+                # Series가 반환될 경우 스칼라로 강제 변환
+                p_val = float(_pv.iloc[0]) if isinstance(_pv, pd.Series) else float(_pv)
+                b_val = float(_bv.iloc[0]) if isinstance(_bv, pd.Series) else float(_bv)
                 excess = (p_val - b_val) if (not pd.isna(p_val) and not pd.isna(b_val)) else float("nan")
 
                 p_color = "#27ae60" if p_val > 0 else "#e74c3c"

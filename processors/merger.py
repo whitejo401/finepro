@@ -102,16 +102,21 @@ def merge_dataframes(
 
     merged = valid[0]
     for df in valid[1:]:
-        # 중복 컬럼 사전 감지
+        # 중복 컬럼 처리: combine_first로 빈 값 보완 후 병합
         overlap = set(merged.columns) & set(df.columns)
         if overlap:
-            log.warning(
-                "merge_dataframes: duplicate columns detected: %s — appending _dup suffix",
+            log.info(
+                "merge_dataframes: duplicate columns %s — combine_first 적용 (기존 값 우선)",
                 sorted(overlap),
             )
-            # 오른쪽 DataFrame의 중복 컬럼에만 suffix 부여
-            df = df.copy()
-            df.rename(columns={c: f"{c}_dup" for c in overlap}, inplace=True)
+            # 중복 컬럼은 combine_first로 결합 (merged 값 우선, 없으면 df 값 사용)
+            for col in overlap:
+                merged[col] = merged[col].combine_first(df[col])
+            # 중복 컬럼 제외한 나머지만 join
+            df = df.drop(columns=list(overlap))
+
+        if df.empty:
+            continue
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", FutureWarning)
@@ -119,6 +124,12 @@ def merge_dataframes(
 
     merged = merged.sort_index()
     merged.index.name = "date"
+
+    # 중복 날짜 제거 (같은 날짜 인덱스가 여러 번 있으면 첫 번째만 유지)
+    if merged.index.duplicated().any():
+        n_dup = merged.index.duplicated().sum()
+        log.warning("merge_dataframes: 날짜 인덱스 중복 %d건 — 첫 번째 값 유지", n_dup)
+        merged = merged[~merged.index.duplicated(keep="first")]
 
     # 결측값 채움: 일간은 5일(주말), 월간/분기 지표는 최대 66일(분기~3개월) 허용
     merged = merged.ffill(limit=66)

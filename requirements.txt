@@ -23,6 +23,8 @@ wbgapi>=1.0.12
 # 분석
 scipy>=1.13.0
 statsmodels>=0.14.0
+scikit-learn>=1.4.0
+lightgbm>=4.3.0
 
 # 시각화
 plotly>=5.22.0
@@ -35,6 +37,7 @@ praw>=7.7.1
 vaderSentiment>=3.3.2
 pytrends>=4.9.2
 requests>=2.32.0
+feedparser>=6.0.0
 
 # API 서버
 fastapi>=0.111.0
