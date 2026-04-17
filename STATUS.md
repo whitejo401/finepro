@@ -40,13 +40,24 @@ python main.py --mode all --start 2025-01-01
 
 ---
 
-## 다음 할 일 (우선순위 순)
+## Phase 14 완료 내역
 
-1. **[버그] w3 중복 컬럼 수정** — `processors/merger.py` 에서 중복 컬럼 발생 시 ccxt 쪽 drop 처리
-2. **[버그] m4 백테스팅 Series 모호성 수정** — `analysis/backtest.py` 또는 `visualization/report.py` 내 `if signal:` → `if signal.any():`
-3. **[개선] pykrx 수급 수집기 복구** — 현재 API명 확인 후 수정
-4. **[개선] 예측 모델 고도화** — `analysis/prediction.py` 현재 Spearman 기반 단순 예측 → RandomForest or LightGBM 추가
-5. **[개선] 스케줄러 자동화** — GitHub Actions cron 또는 Windows 작업 스케줄러 `--mode daily` 매일 실행
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| w3 중복 컬럼 버그 | ✅ 완료 | `merger.py` combine_first + 중복 인덱스 제거 |
+| m4 백테스팅 Series 모호성 | ✅ 완료 | `report.py` 스칼라 강제 변환 |
+| 예측 모델 고도화 | ✅ 완료 | RF + LightGBM + 앙상블 추가 |
+| GitHub Actions 자동화 | ✅ 완료 | 평일 KST 06:00 자동 실행 |
+| pykrx 수급 수집 복구 | ⚠️ 불가 | KRX 서버 API 변경 — 대안 없음 |
+
+**현재 파이프라인**: `main.py --mode all` 실행 시 **22/22 리포트 성공 (ERROR 0건)**
+
+## 다음 할 일
+
+1. **GitHub Secrets 등록** — 레포 Settings → Secrets에 `.env` 키 등록해야 GitHub Actions 실제 실행 가능
+   - 필요 키: `FRED_API_KEY`, `EIA_API_KEY`, `COINGECKO_API_KEY`, `NEWS_API_KEY`, `ECOS_API_KEY`, `DATA_GO_KR_API_KEY`, `MOLIT_API_KEY`
+2. **앙상블 예측 리포트 연동** — `build_d4_report`에 RF/LightGBM 확률 표시 추가
+3. **pykrx 수급 대안 소스 탐색** — 네이버 금융 또는 DART 기관투자자 공시
 
 ---
 
