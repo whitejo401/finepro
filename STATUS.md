@@ -7,7 +7,7 @@
 ## 현재 단계
 
 **Phase 14 — 퀀트 파이프라인 버그 수정 및 고도화**
-마지막 작업일: 2026-04-17
+마지막 작업일: 2026-04-18
 
 ---
 
@@ -21,22 +21,15 @@ python main.py --mode all --start 2025-01-01
 - master: **1068행 × 99컬럼** (2025-01-01 ~ 2026-04-17)
 - 리포트 생성: d1~d6 / w1~w6 / m1~m6 중 **20/22 성공, 2개 에러**
 
-### 에러 목록 (우선 수정 대상)
-
-| 코드 | 리포트 | 에러 메시지 | 근본 원인 | 수정 위치 |
-|------|--------|------------|----------|----------|
-| w3 | 크립토 상관 | `cannot reindex on an axis with duplicate labels` | CoinGecko + ccxt 둘 다 `crypto_btc_close`, `crypto_eth_close` 수집 → merge 후 중복 컬럼 | `processors/merger.py` `merge_dataframes()` 또는 `collectors/global_/crypto.py` |
-| m4 | 백테스팅 | `The truth value of a Series is ambiguous` | `analysis/backtest.py` 또는 `visualization/report.py build_m4_report()` 내 `if signal:` 형태 비교 | `visualization/report.py:build_m4_report` 또는 `analysis/backtest.py` |
-
 ### 데이터 수집 경고 (버그는 아니지만 개선 필요)
 
 | 수집기 | 상태 | 원인 |
 |--------|------|------|
-| pykrx 수급 | 스킵 | KRX API 변경 (`get_market_net_purchases_of_equities_by_investor` 없음) |
 | Reddit 감성 | 스킵 | `REDDIT_CLIENT_ID/SECRET` 미설정 |
 | World Bank | 빈 데이터 | 2025~2026 최신 데이터 미발표 |
 | GDELT | 429 | Too Many Requests (rate limit) |
 | Blockchair | 스킵 | 연속 3회 430 (IP 한도) |
+| Binance ccxt/funding | 451 | GitHub Actions 서버 IP 지역 차단 (로컬 실행 시 정상) |
 
 ---
 
@@ -54,10 +47,7 @@ python main.py --mode all --start 2025-01-01
 
 ## 다음 할 일
 
-1. **GitHub Secrets 등록** — 레포 Settings → Secrets에 `.env` 키 등록해야 GitHub Actions 실제 실행 가능
-   - 필요 키: `FRED_API_KEY`, `EIA_API_KEY`, `COINGECKO_API_KEY`, `NEWS_API_KEY`, `ECOS_API_KEY`, `DATA_GO_KR_API_KEY`, `MOLIT_API_KEY`
-2. **앙상블 예측 리포트 연동** — `build_d4_report`에 RF/LightGBM 확률 표시 추가
-3. **pykrx 수급 대안 소스 탐색** — 네이버 금융 또는 DART 기관투자자 공시
+1. **앙상블 예측 리포트 연동** — `build_d4_report`에 RF/LightGBM 확률 표시 추가
 
 ---
 

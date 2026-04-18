@@ -1390,14 +1390,19 @@ def build_d4_report(
         pred = {}
 
     signal = pred.get("signal", 0)
-    prob_up = pred.get("prob_up")
+    prob_up          = pred.get("prob_up")
+    prob_up_rf       = pred.get("prob_up_rf")
+    prob_up_lgbm     = pred.get("prob_up_lgbm")
+    prob_up_ensemble = pred.get("prob_up_ensemble")
     top_features = pred.get("top_features")
-    vote_detail = pred.get("vote_detail", {})
+    vote_detail  = pred.get("vote_detail", {})
 
     # ── 1. 신호 신호등 카드 ─────────────────────────────────────────────────
-    if signal == 1:
+    # 앙상블 확률이 있으면 그것으로 신호 결정, 없으면 signal 필드 사용
+    _sig_prob = prob_up_ensemble if prob_up_ensemble is not None else (prob_up or 0.5)
+    if _sig_prob > 0.55:
         sig_color, sig_label, sig_icon = "#2ecc71", "상승 예상", "▲"
-    elif signal == -1:
+    elif _sig_prob < 0.45:
         sig_color, sig_label, sig_icon = "#e74c3c", "하락 예상", "▼"
     else:
         sig_color, sig_label, sig_icon = "#f39c12", "중립", "—"
@@ -1412,18 +1417,59 @@ def build_d4_report(
     )
     sections.append(_SECTION_TEMPLATE.format(heading="오늘 KOSPI 방향 예측", chart_html=signal_card))
 
-    # ── 2. 상승 확률 게이지 ─────────────────────────────────────────────────
-    if prob_up is not None:
+    # ── 2. 앙상블 상승 확률 게이지 ────────────────────────────────────────
+    _gauge_prob = prob_up_ensemble if prob_up_ensemble is not None else prob_up
+    if _gauge_prob is not None:
         fig_gauge = plot_gauge(
-            prob_up * 100,
-            title="KOSPI 상승 확률 (로지스틱)",
+            _gauge_prob * 100,
+            title="KOSPI 상승 확률 (앙상블)",
             low_label="하락",
             high_label="상승",
         )
         sections.append(_SECTION_TEMPLATE.format(
-            heading=f"상승 확률: {prob_up:.1%}",
+            heading=f"앙상블 상승 확률: {_gauge_prob:.1%}",
             chart_html=_fig_to_html(fig_gauge),
         ))
+
+    # ── 3. 모델별 상승 확률 비교 ───────────────────────────────────────────
+    model_rows = [
+        ("로지스틱 회귀", prob_up),
+        ("RandomForest",  prob_up_rf),
+        ("LightGBM",      prob_up_lgbm),
+        ("앙상블 평균",    prob_up_ensemble),
+    ]
+    if any(v is not None for _, v in model_rows):
+        tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.95em'>"
+               "<tr style='background:#ecf0f1'>"
+               "<th style='padding:8px 16px;text-align:left'>모델</th>"
+               "<th style='padding:8px 16px;text-align:right'>상승 확률</th>"
+               "<th style='padding:8px 16px;text-align:left'>게이지</th>"
+               "<th style='padding:8px 16px;text-align:center'>신호</th>"
+               "</tr>")
+        for i, (name, prob) in enumerate(model_rows):
+            if prob is None:
+                tbl += (f"<tr style='background:{'#fff' if i%2==0 else '#f8f9fa'}'>"
+                        f"<td style='padding:8px 16px'>{name}</td>"
+                        f"<td colspan='3' style='padding:8px 16px;color:#aaa;text-align:center'>수집 실패</td>"
+                        "</tr>")
+                continue
+            bar_w = int(prob * 100)
+            bar_color = "#2ecc71" if prob > 0.55 else ("#e74c3c" if prob < 0.45 else "#f39c12")
+            icon = "▲" if prob > 0.55 else ("▼" if prob < 0.45 else "—")
+            is_last = (name == "앙상블 평균")
+            fw = "bold" if is_last else "normal"
+            bg = "#eafaf1" if is_last else ("#fff" if i % 2 == 0 else "#f8f9fa")
+            tbl += (f"<tr style='background:{bg};font-weight:{fw}'>"
+                    f"<td style='padding:8px 16px'>{name}</td>"
+                    f"<td style='padding:8px 16px;text-align:right;color:{bar_color}'>{prob:.1%}</td>"
+                    f"<td style='padding:8px 16px'>"
+                    f"<div style='background:#eee;border-radius:4px;height:12px;width:180px'>"
+                    f"<div style='background:{bar_color};width:{bar_w}%;height:100%;border-radius:4px'></div>"
+                    f"</div></td>"
+                    f"<td style='padding:8px 16px;text-align:center;color:{bar_color}'>{icon}</td>"
+                    "</tr>")
+        tbl += "</table>"
+        sections.append(_SECTION_TEMPLATE.format(heading="모델별 상승 확률 비교", chart_html=tbl))
 
     # ── 3. 상위 선행 변수 상관 테이블 ─────────────────────────────────────
     if top_features is not None and not top_features.empty:
@@ -1447,7 +1493,7 @@ def build_d4_report(
         tbl += "</table>"
         sections.append(_SECTION_TEMPLATE.format(heading="상위 선행 변수 (Spearman 상관)", chart_html=tbl))
 
-    # ── 4. 개별 변수 투표 현황 ───────────────────────────────────────────────
+    # ── 5. 개별 변수 투표 현황 ───────────────────────────────────────────────
     if vote_detail:
         vote_rows = ""
         for col, sign in vote_detail.items():
