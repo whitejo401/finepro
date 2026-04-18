@@ -9,7 +9,7 @@ pyarrow>=15.0.0
 python-dotenv>=1.0.0
 
 # 국내 주식
-pykrx>=1.0.47
+pykrx>=1.2.7
 dart-fss>=0.4.7
 
 # 글로벌 시장

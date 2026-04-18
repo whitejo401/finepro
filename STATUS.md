@@ -48,7 +48,7 @@ python main.py --mode all --start 2025-01-01
 | m4 백테스팅 Series 모호성 | ✅ 완료 | `report.py` 스칼라 강제 변환 |
 | 예측 모델 고도화 | ✅ 완료 | RF + LightGBM + 앙상블 추가 |
 | GitHub Actions 자동화 | ✅ 완료 | 평일 KST 06:00 자동 실행 |
-| pykrx 수급 수집 복구 | ⚠️ 불가 | KRX 서버 API 변경 — 대안 없음 |
+| pykrx 수급 수집 복구 | ✅ 완료 | pykrx 1.2.7 업그레이드 + KRX_ID/KRX_PW 환경변수로 로그인 지원 |
 
 **현재 파이프라인**: `main.py --mode all` 실행 시 **22/22 리포트 성공 (ERROR 0건)**
 
@@ -90,3 +90,4 @@ python main.py --mode all --start 2025-01-01
 |----|------|------|
 | `GITHUB_TOKEN` | crypto_intel 개발활동 (없으면 60req/hr) | 미입력 |
 | `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | Reddit 커뮤니티 감성 | 미입력 |
+| `KRX_ID` / `KRX_PW` | pykrx 1.2.7+ 투자자별 수급 수집 | ✅ 입력완료 |

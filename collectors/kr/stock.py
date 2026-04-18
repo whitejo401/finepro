@@ -190,29 +190,22 @@ def get_market_net_buying(
 
     log.info("fetch pykrx market net buying: %s (%s ~ %s)", market, start, end)
 
-    # pykrx 1.2.4: KRX API 변경으로 investor 관련 함수들이 부분적으로 동작하지 않음
-    # get_market_net_purchases_of_equities_by_investor → 존재하지 않음
-    # get_market_trading_value_by_investor → '거래대금' KeyError
-    # 아래 코드는 pykrx 수정 시를 대비해 유지하되 실패 시 graceful skip 처리
-    func = getattr(krx, "get_market_net_purchases_of_equities_by_investor", None)
-    if func is None:
-        log.warning(
-            "pykrx: get_market_net_purchases_of_equities_by_investor 없음 "
-            "(KRX API 변경으로 미지원) — 수급 수집 스킵"
-        )
-        return pd.DataFrame()
-
+    # pykrx 1.2.7+: KRX_ID/KRX_PW 환경변수로 로그인 후 수급 데이터 수집 가능.
+    # get_market_trading_value_by_date → 날짜별 × 투자자별(기관합계/외국인합계/개인) 순매수금액.
     try:
-        raw = func(_fmt(start), _fmt(end), market)
+        raw = krx.get_market_trading_value_by_date(_fmt(start), _fmt(end), market)
     except Exception as e:
-        log.warning("pykrx market net buying API error for %s: %s", market, e)
+        log.warning(
+            "pykrx market net buying 수집 실패 (%s): %s — KRX_ID/KRX_PW 환경변수 확인 필요",
+            market, e,
+        )
         return pd.DataFrame()
 
     if raw.empty:
         log.warning("empty market net buying for %s", market)
         return pd.DataFrame()
 
-    # 외국인 / 기관합계 컬럼 탐색
+    # 컬럼: 기관합계 / 외국인합계 / 개인 / 기타법인 / 전체
     foreign_col = next((c for c in raw.columns if "외국인" in str(c)), None)
     inst_col    = next((c for c in raw.columns if "기관합계" in str(c)), None)
 

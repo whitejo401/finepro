@@ -2872,7 +2872,7 @@ def build_m4_report(
                         f"<td style='padding:8px 16px;text-align:right'>"
                         f"{'N/A' if pd.isna(b_val) else f'{b_val*100:.1f}%'}</td>"
                         f"<td style='padding:8px 16px;text-align:right;color:{e_color}'>"
-                        f"{'N/A' if pd.isna(excess) else f'{'+'if excess>0 else ''}{excess*100:.1f}%'}</td>"
+                        f"{'N/A' if pd.isna(excess) else ('+' if excess>0 else '') + f'{excess*100:.1f}%'}</td>"
                         "</tr>")
             tbl += "</table>"
             sections.append(_SECTION_TEMPLATE.format(heading="연도별 수익률", chart_html=tbl))
