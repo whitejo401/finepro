@@ -343,6 +343,49 @@ def main():
                 path = func(master)
             log.info("%s 리포트: %s", label, path)
             generated.append(path)
+
+            # d4 리포트 생성 후 예측 로그 저장
+            if key == "d4":
+                try:
+                    from analysis.prediction import build_today_prediction, save_prediction_log
+                    pred = build_today_prediction(master)
+                    ref = pred.get("ref_date", master.index[-1].strftime("%Y-%m-%d"))
+                    p_ens = pred.get("prob_up_ensemble")
+                    p_logit = pred.get("prob_up")
+                    _sig_prob = p_ens if p_ens is not None else (p_logit or 0.5)
+                    predicted = 1 if _sig_prob > 0.5 else -1
+
+                    # VIX 값 추출
+                    vix_val = None
+                    vix_cols = [c for c in master.columns if "vix" in c.lower() and "close" in c.lower()]
+                    if vix_cols and not master[vix_cols[0]].dropna().empty:
+                        vix_val = float(master[vix_cols[0]].dropna().iloc[-1])
+
+                    # 전날 예측에 actual 업데이트
+                    if len(master) >= 2 and "kr_kospi_close" in master.columns:
+                        prev_date = master.index[-2].strftime("%Y-%m-%d")
+                        ret = master["kr_kospi_close"].pct_change(fill_method=None).iloc[-1]
+                        actual_today = 1 if ret > 0 else -1
+                        save_prediction_log(
+                            prev_date,
+                            prob_up=None, predicted=0,  # 전날 actual만 업데이트
+                            actual=actual_today,
+                        )
+
+                    save_prediction_log(
+                        ref,
+                        prob_up=p_logit,
+                        predicted=predicted,
+                        actual=None,
+                        prob_up_rf=pred.get("prob_up_rf"),
+                        prob_up_lgbm=pred.get("prob_up_lgbm"),
+                        prob_up_ensemble=p_ens,
+                        vix=vix_val,
+                    )
+                    log.info("예측 로그 저장 완료: %s", ref)
+                except Exception as _e:
+                    log.warning("예측 로그 저장 실패: %s", _e)
+
         except Exception as e:
             log.error("%s report failed: %s", label, e)
 

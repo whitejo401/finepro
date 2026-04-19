@@ -601,56 +601,86 @@ def model_ensemble_predict(
 
 def save_prediction_log(
     date_str: str,
-    prob_up: float,
+    prob_up: float | None,
     predicted: int,
     actual: int | None = None,
+    prob_up_rf: float | None = None,
+    prob_up_lgbm: float | None = None,
+    prob_up_ensemble: float | None = None,
+    vix: float | None = None,
 ) -> None:
     """
-    일별 예측 결과를 parquet 로그에 추가 저장.
+    일별 예측 결과를 parquet 로그에 추가 저장 (다중 모델 지원).
 
     Args:
-        date_str : 'YYYY-MM-DD'
-        prob_up  : 상승 확률 (0~1)
-        predicted: +1/-1
-        actual   : 실제 방향 (+1/-1), 당일엔 None, 다음날 채움
+        date_str         : 'YYYY-MM-DD'
+        prob_up          : 로지스틱 상승 확률 (0~1)
+        predicted        : 앙상블 기준 예측 방향 +1/-1
+        actual           : 실제 방향 (+1/-1), 당일엔 None, 다음날 채움
+        prob_up_rf       : RandomForest 상승 확률
+        prob_up_lgbm     : LightGBM 상승 확률
+        prob_up_ensemble : 앙상블 평균 확률
+        vix              : 당일 VIX 값 (레짐 분류용)
     """
     _PRED_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     new_row = pd.DataFrame([{
-        "date": pd.Timestamp(date_str),
-        "prob_up": prob_up,
-        "predicted": predicted,
-        "actual": actual,
-        "hit": int(predicted == actual) if actual is not None else None,
+        "date":             pd.Timestamp(date_str),
+        "prob_up":          prob_up,
+        "prob_up_rf":       prob_up_rf,
+        "prob_up_lgbm":     prob_up_lgbm,
+        "prob_up_ensemble": prob_up_ensemble,
+        "predicted":        predicted,
+        "actual":           actual,
+        "hit":              int(predicted == actual) if actual is not None else None,
+        "vix":              vix,
     }]).set_index("date")
 
     if _PRED_LOG_PATH.exists():
         existing = pd.read_parquet(_PRED_LOG_PATH)
+        # 신규 컬럼 추가 호환
+        for col in new_row.columns:
+            if col not in existing.columns:
+                existing[col] = None
         combined = pd.concat([existing, new_row])
         combined = combined[~combined.index.duplicated(keep="last")]
     else:
         combined = new_row
 
     combined.to_parquet(_PRED_LOG_PATH)
-    log.info("예측 로그 저장: %s (prob_up=%.2f, predicted=%+d)", date_str, prob_up, predicted)
+    log.info("예측 로그 저장: %s (ensemble=%.2f, predicted=%+d)",
+             date_str, prob_up_ensemble or prob_up or 0.5, predicted)
 
 
 def load_prediction_log() -> pd.DataFrame:
     """
-    예측 로그 불러오기 + 누적 적중률 컬럼 추가.
+    예측 로그 불러오기 + 파생 컬럼 추가.
 
     Returns:
-        DataFrame (index=date, columns: prob_up, predicted, actual, hit, cumulative_hit_rate)
+        DataFrame (index=date, columns: prob_up*, predicted, actual, hit,
+                   cumulative_hit_rate, rolling_hit_rate_20, vix_regime)
     """
     if not _PRED_LOG_PATH.exists():
         return pd.DataFrame()
 
     df = pd.read_parquet(_PRED_LOG_PATH).sort_index()
     valid = df.dropna(subset=["hit"])
+
     if not valid.empty:
-        df.loc[valid.index, "cumulative_hit_rate"] = (
-            valid["hit"].expanding().mean()
+        df.loc[valid.index, "cumulative_hit_rate"] = valid["hit"].expanding().mean()
+        if len(valid) >= 5:
+            df.loc[valid.index, "rolling_hit_rate_20"] = (
+                valid["hit"].rolling(20, min_periods=5).mean()
+            )
+
+    # VIX 레짐 분류
+    if "vix" in df.columns and df["vix"].notna().any():
+        df["vix_regime"] = pd.cut(
+            df["vix"],
+            bins=[0, 15, 25, 9999],
+            labels=["저변동(VIX<15)", "중변동(15~25)", "고변동(VIX>25)"],
         )
+
     return df
 
 

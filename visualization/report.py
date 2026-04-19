@@ -1690,105 +1690,192 @@ def build_w5_report(
     sections: list[str] = []
 
     try:
-        from analysis.prediction import load_prediction_log, rolling_logit_predict
+        from analysis.prediction import (
+            load_prediction_log, model_ensemble_predict, rolling_logit_predict,
+            rolling_rf_predict, rolling_lgbm_predict,
+        )
         pred_log = load_prediction_log()
 
-        # 로그가 없으면 master로 새로 계산
-        if pred_log.empty:
-            logit_df = rolling_logit_predict(master)
-            pred_log = logit_df if not logit_df.empty else pd.DataFrame()
-            if not pred_log.empty and "hit" not in pred_log.columns:
-                pred_log["hit"] = (pred_log["predicted"] == pred_log["actual"]).astype(int)
-            if not pred_log.empty and "cumulative_hit_rate" not in pred_log.columns:
-                valid = pred_log.dropna(subset=["hit"])
-                if not valid.empty:
-                    pred_log.loc[valid.index, "cumulative_hit_rate"] = valid["hit"].expanding().mean()
+        # 로그가 없거나 부족하면 master로 새로 계산 (앙상블)
+        if pred_log.empty or len(pred_log.dropna(subset=["hit"])) < 10:
+            ens_df = model_ensemble_predict(master)
+            if not ens_df.empty:
+                pred_log = ens_df.copy()
+                pred_log["cumulative_hit_rate"] = (
+                    pred_log["hit"].dropna().expanding().mean()
+                )
+                if len(pred_log.dropna(subset=["hit"])) >= 5:
+                    pred_log["rolling_hit_rate_20"] = (
+                        pred_log["hit"].dropna().rolling(20, min_periods=5).mean()
+                    )
+                # VIX 레짐
+                vix_cols = [c for c in master.columns if "vix" in c.lower() and "close" in c.lower()]
+                if vix_cols:
+                    pred_log = pred_log.join(master[vix_cols[0]].rename("vix"), how="left")
+                    pred_log["vix_regime"] = pd.cut(
+                        pred_log["vix"],
+                        bins=[0, 15, 25, 9999],
+                        labels=["저변동(VIX<15)", "중변동(15~25)", "고변동(VIX>25)"],
+                    )
 
         if not pred_log.empty:
             valid_log = pred_log.dropna(subset=["hit"])
 
-            # ── 1. 누적 적중률 라인 차트 ─────────────────────────────────────
+            # ── 1. 적중률 요약 카드 ───────────────────────────────────────────
+            if not valid_log.empty:
+                total = len(valid_log)
+                hits  = int(valid_log["hit"].sum())
+                hit_rate = hits / total if total > 0 else 0
+                color = "#2ecc71" if hit_rate >= 0.55 else ("#f39c12" if hit_rate >= 0.5 else "#e74c3c")
+
+                # 모델별 적중률 계산
+                model_stats = []
+                for col, name in [
+                    ("prob_up_logit",    "로지스틱"),
+                    ("prob_up_rf",       "RandomForest"),
+                    ("prob_up_lgbm",     "LightGBM"),
+                    ("prob_up_ensemble", "앙상블"),
+                ]:
+                    c = col if col in valid_log.columns else ("prob_up" if col == "prob_up_logit" else None)
+                    if c and c in valid_log.columns and valid_log[c].notna().sum() >= 5:
+                        pred_col = (valid_log[c] >= 0.5).map({True: 1, False: -1})
+                        m_hit = (pred_col == valid_log["actual"]).mean()
+                        model_stats.append((name, m_hit, valid_log[c].notna().sum()))
+
+                cards_html = (
+                    f"<div style='display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px'>"
+                    f"<div style='flex:1;min-width:120px;text-align:center;padding:14px;"
+                    f"background:{color}22;border:2px solid {color};border-radius:8px'>"
+                    f"<div style='font-size:1.8em;font-weight:bold;color:{color}'>{hit_rate:.1%}</div>"
+                    f"<div style='color:#555;font-size:0.85em;margin-top:4px'>앙상블 적중률</div></div>"
+                    f"<div style='flex:1;min-width:120px;text-align:center;padding:14px;"
+                    f"background:#ecf0f122;border:2px solid #bdc3c7;border-radius:8px'>"
+                    f"<div style='font-size:1.8em;font-weight:bold;color:#2c3e50'>{total}</div>"
+                    f"<div style='color:#555;font-size:0.85em;margin-top:4px'>예측 건수</div></div>"
+                    f"<div style='flex:1;min-width:120px;text-align:center;padding:14px;"
+                    f"background:#2ecc7122;border:2px solid #2ecc71;border-radius:8px'>"
+                    f"<div style='font-size:1.8em;font-weight:bold;color:#2ecc71'>{hits}</div>"
+                    f"<div style='color:#555;font-size:0.85em;margin-top:4px'>적중 건수</div></div>"
+                    f"</div>"
+                )
+
+                # 모델별 비교 행
+                if model_stats:
+                    cards_html += "<table style='border-collapse:collapse;width:100%;font-size:0.9em;margin-top:8px'>"
+                    cards_html += ("<tr style='background:#ecf0f1'>"
+                                   "<th style='padding:6px 12px;text-align:left'>모델</th>"
+                                   "<th style='padding:6px 12px;text-align:right'>적중률</th>"
+                                   "<th style='padding:6px 12px;text-align:right'>건수</th>"
+                                   "<th style='padding:6px 12px;text-align:left'>게이지</th></tr>")
+                    for name, mhr, cnt in model_stats:
+                        mc = "#2ecc71" if mhr >= 0.55 else ("#f39c12" if mhr >= 0.5 else "#e74c3c")
+                        bw = int(mhr * 100)
+                        cards_html += (f"<tr><td style='padding:6px 12px'>{name}</td>"
+                                       f"<td style='padding:6px 12px;text-align:right;color:{mc};font-weight:bold'>{mhr:.1%}</td>"
+                                       f"<td style='padding:6px 12px;text-align:right;color:#888'>{cnt}</td>"
+                                       f"<td style='padding:6px 12px'>"
+                                       f"<div style='background:#eee;border-radius:4px;height:10px;width:160px'>"
+                                       f"<div style='background:{mc};width:{bw}%;height:100%;border-radius:4px'></div>"
+                                       f"</div></td></tr>")
+                    cards_html += "</table>"
+
+                sections.append(_SECTION_TEMPLATE.format(heading="예측 정확도 요약", chart_html=cards_html))
+
+            # ── 2. 누적 + 롤링 적중률 라인 차트 ─────────────────────────────
+            fig_hr = go.Figure()
             if "cumulative_hit_rate" in pred_log.columns:
-                hr_series = pred_log["cumulative_hit_rate"].dropna()
-                if not hr_series.empty:
-                    fig_hr = go.Figure()
+                hr_s = pred_log["cumulative_hit_rate"].dropna()
+                if not hr_s.empty:
                     fig_hr.add_trace(go.Scatter(
-                        x=hr_series.index, y=hr_series.values * 100,
-                        mode="lines", name="누적 적중률 (%)",
+                        x=hr_s.index, y=hr_s.values * 100,
+                        mode="lines", name="누적 적중률",
                         line=dict(color="#3498db", width=2),
                     ))
-                    fig_hr.add_hline(y=50, line_dash="dot", line_color="#e74c3c",
-                                     annotation_text="랜덤 기준 (50%)")
-                    fig_hr.update_layout(
-                        title="KOSPI 방향 예측 누적 적중률",
-                        yaxis=dict(title="적중률 (%)", range=[30, 80]),
-                        hovermode="x",
-                    )
-                    sections.append(_SECTION_TEMPLATE.format(
-                        heading="누적 예측 적중률",
-                        chart_html=_fig_to_html(fig_hr),
+            if "rolling_hit_rate_20" in pred_log.columns:
+                rhr = pred_log["rolling_hit_rate_20"].dropna()
+                if not rhr.empty:
+                    fig_hr.add_trace(go.Scatter(
+                        x=rhr.index, y=rhr.values * 100,
+                        mode="lines", name="롤링 20일 적중률",
+                        line=dict(color="#e67e22", width=2, dash="dot"),
                     ))
+            if fig_hr.data:
+                fig_hr.add_hline(y=50, line_dash="dot", line_color="#e74c3c",
+                                 annotation_text="랜덤 기준 (50%)")
+                fig_hr.update_layout(
+                    title="KOSPI 방향 예측 적중률 추이",
+                    yaxis=dict(title="적중률 (%)", range=[25, 85]),
+                    hovermode="x unified", legend=dict(orientation="h"),
+                )
+                sections.append(_SECTION_TEMPLATE.format(
+                    heading="누적 / 롤링 예측 적중률",
+                    chart_html=_fig_to_html(fig_hr),
+                ))
 
-            # ── 2. 최근 20일 예측 vs 실제 테이블 ─────────────────────────────
+            # ── 3. VIX 레짐별 적중률 ─────────────────────────────────────────
+            if "vix_regime" in pred_log.columns and not valid_log.empty:
+                regime_valid = valid_log.dropna(subset=["vix_regime"])
+                if not regime_valid.empty:
+                    regime_stats = (
+                        regime_valid.groupby("vix_regime", observed=True)["hit"]
+                        .agg(["mean", "count"])
+                        .reset_index()
+                    )
+                    tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
+                           "<tr style='background:#ecf0f1'>"
+                           "<th style='padding:8px 12px;text-align:left'>VIX 레짐</th>"
+                           "<th style='padding:8px 12px;text-align:right'>적중률</th>"
+                           "<th style='padding:8px 12px;text-align:right'>건수</th>"
+                           "<th style='padding:8px 12px;text-align:left'>게이지</th></tr>")
+                    for _, rr in regime_stats.iterrows():
+                        rc = "#2ecc71" if rr["mean"] >= 0.55 else ("#f39c12" if rr["mean"] >= 0.5 else "#e74c3c")
+                        bw = int(rr["mean"] * 100)
+                        tbl += (f"<tr><td style='padding:8px 12px'>{rr['vix_regime']}</td>"
+                                f"<td style='padding:8px 12px;text-align:right;color:{rc};font-weight:bold'>{rr['mean']:.1%}</td>"
+                                f"<td style='padding:8px 12px;text-align:right;color:#888'>{int(rr['count'])}</td>"
+                                f"<td style='padding:8px 12px'>"
+                                f"<div style='background:#eee;border-radius:4px;height:10px;width:160px'>"
+                                f"<div style='background:{rc};width:{bw}%;height:100%;border-radius:4px'></div>"
+                                f"</div></td></tr>")
+                    tbl += "</table>"
+                    sections.append(_SECTION_TEMPLATE.format(heading="VIX 레짐별 예측 적중률", chart_html=tbl))
+
+            # ── 4. 최근 20일 예측 vs 실제 테이블 ─────────────────────────────
             recent = valid_log.tail(20)
             if not recent.empty:
+                has_ens = "prob_up_ensemble" in recent.columns
                 tbl = ("<table style='border-collapse:collapse;width:100%;font-size:0.9em'>"
                        "<tr style='background:#ecf0f1'>"
                        "<th style='padding:6px 12px;text-align:left'>날짜</th>"
                        "<th style='padding:6px 12px;text-align:right'>예측</th>"
                        "<th style='padding:6px 12px;text-align:right'>실제</th>"
-                       "<th style='padding:6px 12px;text-align:right'>적중</th>")
-                if "prob_up" in recent.columns:
-                    tbl += "<th style='padding:6px 12px;text-align:right'>상승확률</th>"
+                       "<th style='padding:6px 12px;text-align:right'>적중</th>"
+                       "<th style='padding:6px 12px;text-align:right'>앙상블확률</th>")
+                if "vix" in recent.columns:
+                    tbl += "<th style='padding:6px 12px;text-align:right'>VIX</th>"
                 tbl += "</tr>"
-
                 for dt, row in recent.iterrows():
-                    hit = int(row["hit"]) if "hit" in row and not pd.isna(row["hit"]) else None
+                    hit = int(row["hit"]) if not pd.isna(row.get("hit", float("nan"))) else None
                     bg = "#f0fff4" if hit == 1 else ("#fff0f0" if hit == 0 else "#fff")
                     pred_icon = "▲" if row.get("predicted", 0) == 1 else "▼"
                     actual_icon = "▲" if row.get("actual", 0) == 1 else "▼"
                     hit_icon = "O" if hit == 1 else ("X" if hit == 0 else "—")
                     hit_color = "#2ecc71" if hit == 1 else ("#e74c3c" if hit == 0 else "#999")
                     dt_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)
+                    p_ens = row.get("prob_up_ensemble") or row.get("prob_up")
+                    prob_str = f"{p_ens:.1%}" if pd.notna(p_ens) else "—"
                     tbl += (f"<tr style='background:{bg}'>"
                             f"<td style='padding:6px 12px'>{dt_str}</td>"
                             f"<td style='padding:6px 12px;text-align:right'>{pred_icon}</td>"
                             f"<td style='padding:6px 12px;text-align:right'>{actual_icon}</td>"
-                            f"<td style='padding:6px 12px;text-align:right;color:{hit_color};font-weight:bold'>{hit_icon}</td>")
-                    if "prob_up" in recent.columns:
-                        prob = row.get("prob_up")
-                        prob_str = f"{prob:.1%}" if pd.notna(prob) else "—"
-                        tbl += f"<td style='padding:6px 12px;text-align:right'>{prob_str}</td>"
+                            f"<td style='padding:6px 12px;text-align:right;color:{hit_color};font-weight:bold'>{hit_icon}</td>"
+                            f"<td style='padding:6px 12px;text-align:right'>{prob_str}</td>")
+                    if "vix" in recent.columns:
+                        vv = row.get("vix")
+                        tbl += f"<td style='padding:6px 12px;text-align:right'>{f'{vv:.1f}' if pd.notna(vv) else '—'}</td>"
                     tbl += "</tr>"
                 tbl += "</table>"
                 sections.append(_SECTION_TEMPLATE.format(heading="최근 20일 예측 결과", chart_html=tbl))
-
-            # ── 3. 적중률 요약 카드 ───────────────────────────────────────────
-            if not valid_log.empty:
-                total = len(valid_log)
-                hits = int(valid_log["hit"].sum())
-                hit_rate = hits / total if total > 0 else 0
-                color = "#2ecc71" if hit_rate >= 0.55 else ("#f39c12" if hit_rate >= 0.5 else "#e74c3c")
-                summary_card = (
-                    f"<div style='display:flex;gap:16px;flex-wrap:wrap'>"
-                    f"<div style='flex:1;min-width:140px;text-align:center;padding:16px;"
-                    f"background:{color}22;border:2px solid {color};border-radius:8px'>"
-                    f"<div style='font-size:2em;font-weight:bold;color:{color}'>{hit_rate:.1%}</div>"
-                    f"<div style='color:#555;margin-top:4px'>전체 적중률</div>"
-                    f"</div>"
-                    f"<div style='flex:1;min-width:140px;text-align:center;padding:16px;"
-                    f"background:#ecf0f122;border:2px solid #bdc3c7;border-radius:8px'>"
-                    f"<div style='font-size:2em;font-weight:bold;color:#2c3e50'>{total}</div>"
-                    f"<div style='color:#555;margin-top:4px'>예측 건수</div>"
-                    f"</div>"
-                    f"<div style='flex:1;min-width:140px;text-align:center;padding:16px;"
-                    f"background:#2ecc7122;border:2px solid #2ecc71;border-radius:8px'>"
-                    f"<div style='font-size:2em;font-weight:bold;color:#2ecc71'>{hits}</div>"
-                    f"<div style='color:#555;margin-top:4px'>적중 건수</div>"
-                    f"</div>"
-                    f"</div>"
-                )
-                sections.append(_SECTION_TEMPLATE.format(heading="예측 정확도 요약", chart_html=summary_card))
 
     except Exception as e:
         log.warning("build_w5_report: 예측 로그 로드 실패: %s", e)
