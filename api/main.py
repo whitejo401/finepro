@@ -58,6 +58,19 @@ app.include_router(transit_router,      prefix="/api/v1/transit",        tags=["
 app.include_router(card_router,         prefix="/api/v1/card",           tags=["card"])
 
 
+@app.get("/api/v1/data/status", tags=["system"])
+def data_status():
+    """master 데이터 신선도 상태 확인."""
+    from api.core.master import get_master_meta
+    return get_master_meta()
+
+
+@app.get("/api/v1/health", tags=["system"])
+def health():
+    """서비스 헬스체크."""
+    return {"status": "ok"}
+
+
 @app.get("/")
 def root():
     return {

@@ -266,6 +266,16 @@ def main():
         log.error("merge failed: %s", e)
         return
 
+    # ── 7-1. master 저장 (API 서버용) ────────────────────────────────────────
+    try:
+        from config import PROCESSED_DIR
+        PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+        full_path = PROCESSED_DIR / "master_full.parquet"
+        master.to_parquet(full_path)
+        log.info("master 저장 완료: %s (%d rows x %d cols)", full_path, *master.shape)
+    except Exception as e:
+        log.warning("master parquet 저장 실패: %s", e)
+
     # ── 8. 리포트 생성 ───────────────────────────────────────────────────────
     mode = args.mode
     generated: list[str] = []

@@ -1,12 +1,11 @@
 """finance/market — 시장 스냅샷 엔드포인트."""
-import glob
 import os
 from fastapi import APIRouter, HTTPException
 import pandas as pd
 
 from api.core.cache import cache
+from api.core.master import get_master
 from api.core.response import ok, error
-from config import PROCESSED_DIR
 
 router = APIRouter()
 
@@ -15,10 +14,10 @@ TTL_MARKET = 300  # 5분
 
 def _load_latest_master() -> pd.DataFrame:
     """최신 master parquet 로드."""
-    files = sorted(glob.glob(str(PROCESSED_DIR / "master_*.parquet")))
-    if not files:
+    df = get_master()
+    if df.empty:
         raise FileNotFoundError("master parquet 없음")
-    return pd.read_parquet(files[-1])
+    return df
 
 
 @router.get("/snapshot")
