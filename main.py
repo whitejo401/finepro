@@ -223,6 +223,16 @@ def main():
     except Exception as e:
         log.warning("sentiment alt collector failed: %s", e)
 
+    # ── 6-g. Google Trends 시장 감성 (pytrends, 키 불필요) ──────────────────
+    try:
+        from collectors.global_.trends import get_trends_sentiment
+        df_trends = get_trends_sentiment(start=start, end=end, use_cache=use_cache)
+        if not df_trends.empty:
+            frames.append(df_trends)
+            log.info("google trends sentiment: %d rows x %d cols", *df_trends.shape)
+    except Exception as e:
+        log.warning("google trends collector failed: %s", e)
+
     # ── 7. 고래 온체인 (Whale Alert + Glassnode) ────────────────────────────
     try:
         from collectors.global_.whale import get_whale_dataset

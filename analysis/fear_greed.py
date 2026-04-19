@@ -29,12 +29,14 @@ from collectors.base import get_logger
 log = get_logger("analysis.fear_greed")
 
 # (컬럼명, 방향: +1=정방향, -1=역방향, 가중치)
+# 가중치 합계 = 1.0 (가용 지표 수에 따라 정규화됨)
 _COMPONENTS = [
-    ("alt_vix_close",          -1, 0.25),
-    ("rate_hy_spread",         -1, 0.20),
-    ("sent_news_global",       +1, 0.25),
-    ("crypto_btc_dominance",   -1, 0.15),
-    ("rate_spread_10_2",       +1, 0.15),
+    ("alt_vix_close",           -1, 0.22),
+    ("rate_hy_spread",          -1, 0.18),
+    ("sent_news_global",        +1, 0.20),
+    ("crypto_btc_dominance",    -1, 0.13),
+    ("rate_spread_10_2",        +1, 0.12),
+    ("trends_fear_greed_us",    +1, 0.15),  # Google Trends (탐욕-공포 순합산)
 ]
 
 
