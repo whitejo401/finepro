@@ -72,7 +72,7 @@ def classify_regime(
         ~pmi_up & ~cpi_up,  # deflation
     ]
 
-    result_arr = np.select(conditions, _REGIMES, default=np.nan)
+    result_arr = np.select(conditions, _REGIMES, default=None)
 
     # diff()로 생긴 NaN 구간은 NaN 유지
     valid_mask = pmi_chg.notna() & cpi_chg.notna()

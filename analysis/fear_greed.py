@@ -66,7 +66,7 @@ def calc_fear_greed_index(
     composite = pd.Series(0.0, index=master.index)
 
     for col, direction, weight in available:
-        s = master[col].fillna(method="ffill")
+        s = master[col].ffill()
         # Z-Score (롤링)
         roll_mean = s.rolling(rolling_window, min_periods=30).mean()
         roll_std  = s.rolling(rolling_window, min_periods=30).std()
@@ -118,7 +118,7 @@ def fear_greed_summary(master: pd.DataFrame) -> dict:
     for col, direction, _ in _COMPONENTS:
         if col not in master.columns:
             continue
-        s = master[col].fillna(method="ffill").dropna()
+        s = master[col].ffill().dropna()
         if s.empty or s.std() == 0:
             continue
         z = float((s.iloc[-1] - s.mean()) / s.std())
